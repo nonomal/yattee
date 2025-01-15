@@ -15,6 +15,7 @@ final class SubscribedChannelsModel: ObservableObject, CacheModel {
     let storage = try? Storage<String, JSON>(
         diskConfig: SubscribedChannelsModel.diskConfig,
         memoryConfig: SubscribedChannelsModel.memoryConfig,
+        fileManager: FileManager.default,
         transformer: BaseCacheModel.jsonTransformer
     )
 
@@ -23,6 +24,7 @@ final class SubscribedChannelsModel: ObservableObject, CacheModel {
     @Published var error: RequestError?
 
     var accounts: AccountsModel { .shared }
+    var unwatchedFeedCount: UnwatchedFeedCountModel { .shared }
 
     var resource: Resource? {
         accounts.api.subscriptions
@@ -30,6 +32,19 @@ final class SubscribedChannelsModel: ObservableObject, CacheModel {
 
     var all: [Channel] {
         channels.sorted { $0.name.lowercased() < $1.name.lowercased() }
+    }
+
+    var allByUnwatchedCount: [Channel] {
+        if let account = accounts.current {
+            return all.sorted { c1, c2 in
+                let c1HasUnwatched = (unwatchedFeedCount.unwatchedByChannel[account]?[c1.id] ?? -1) > 0
+                let c2HasUnwatched = (unwatchedFeedCount.unwatchedByChannel[account]?[c2.id] ?? -1) > 0
+                let nameIncreasing = c1.name.lowercased() < c2.name.lowercased()
+
+                return c1HasUnwatched ? (c2HasUnwatched ? nameIncreasing : true) : (c2HasUnwatched ? false : nameIncreasing)
+            }
+        }
+        return all
     }
 
     func subscribe(_ channelID: String, onSuccess: @escaping () -> Void = {}) {
@@ -54,15 +69,14 @@ final class SubscribedChannelsModel: ObservableObject, CacheModel {
             return
         }
 
-        loadCachedChannels(account)
-
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             let request = force ? self.resource?.load() : self.resource?.loadIfNeeded()
+            guard request != nil else { return }
 
-            if request != nil {
-                self.isLoading = true
-            }
+            self.loadCachedChannels(account)
+
+            self.isLoading = true
 
             request?
                 .onCompletion { [weak self] _ in
@@ -72,7 +86,6 @@ final class SubscribedChannelsModel: ObservableObject, CacheModel {
                     self.error = nil
                     if let channels: [Channel] = resource.typedContent() {
                         self.channels = channels
-                        channels.forEach { ChannelsCacheModel.shared.storeIfMissing($0) }
                         self.storeChannels(account: account, channels: channels)
                         FeedModel.shared.calculateUnwatchedFeed()
                         onSuccess()
@@ -92,16 +105,18 @@ final class SubscribedChannelsModel: ObservableObject, CacheModel {
     }
 
     func storeChannels(account: Account, channels: [Channel]) {
-        let date = iso8601DateFormatter.string(from: Date())
-        logger.info("caching channels \(channelsDateCacheKey(account)) -- \(date)")
+        DispatchQueue.global(qos: .background).async {
+            let date = self.iso8601DateFormatter.string(from: Date())
+            self.logger.info("caching channels \(self.channelsDateCacheKey(account)) -- \(date)")
 
-        channels.forEach { ChannelsCacheModel.shared.storeIfMissing($0) }
+            channels.forEach { ChannelsCacheModel.shared.storeIfMissing($0) }
 
-        let dateObject: JSON = ["date": date]
-        let channelsObject: JSON = ["channels": channels.map(\.json).map(\.object)]
+            let dateObject: JSON = ["date": date]
+            let channelsObject: JSON = ["channels": channels.map(\.json).map(\.object)]
 
-        try? storage?.setObject(dateObject, forKey: channelsDateCacheKey(account))
-        try? storage?.setObject(channelsObject, forKey: channelsCacheKey(account))
+            try? self.storage?.setObject(dateObject, forKey: self.channelsDateCacheKey(account))
+            try? self.storage?.setObject(channelsObject, forKey: self.channelsCacheKey(account))
+        }
     }
 
     func getChannels(account: Account) -> [Channel] {
@@ -110,12 +125,12 @@ final class SubscribedChannelsModel: ObservableObject, CacheModel {
         if let json = try? storage?.object(forKey: channelsCacheKey(account)),
            let channels = json.dictionaryValue["channels"]
         {
-            return channels.arrayValue.map { json in
+            return channels.arrayValue.compactMap { json in
                 let channel = Channel.from(json)
                 if !channel.hasExtendedDetails,
                    let cache = ChannelsCacheModel.shared.retrieve(channel.cacheKey)
                 {
-                    return cache
+                    return cache.channel
                 }
 
                 return channel

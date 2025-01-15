@@ -13,7 +13,7 @@ final class InstancesModel: ObservableObject {
             return nil
         }
 
-        return InstancesModel.shared.find(id)
+        return Self.shared.find(id)
     }
 
     var lastUsed: Instance? {
@@ -21,7 +21,7 @@ final class InstancesModel: ObservableObject {
             return nil
         }
 
-        return InstancesModel.shared.find(id)
+        return Self.shared.find(id)
     }
 
     func find(_ id: Instance.ID?) -> Instance? {
@@ -32,17 +32,31 @@ final class InstancesModel: ObservableObject {
         return Defaults[.instances].first { $0.id == id }
     }
 
+    func findByURLString(_ urlString: String?) -> Instance? {
+        guard let urlString else { return nil }
+
+        return Defaults[.instances].first { $0.apiURLString == urlString }
+    }
+
     func accounts(_ id: Instance.ID?) -> [Account] {
         Defaults[.accounts].filter { $0.instanceID == id }
     }
 
-    func add(app: VideosApp, name: String, url: String) -> Instance {
+    func add(id: String? = UUID().uuidString, app: VideosApp, name: String, url: String) -> Instance {
         let instance = Instance(
-            app: app, id: UUID().uuidString, name: name, apiURLString: standardizedURL(url)
+            app: app, id: id, name: name, apiURLString: standardizedURL(url)
         )
         Defaults[.instances].append(instance)
 
         return instance
+    }
+
+    func insert(id: String? = UUID().uuidString, app: VideosApp, name: String, url: String) -> Instance {
+        if let instance = Defaults[.instances].first(where: { $0.apiURL.absoluteString == standardizedURL(url) }) {
+            return instance
+        }
+
+        return add(id: id, app: app, name: name, url: url)
     }
 
     func setFrontendURL(_ instance: Instance, _ url: String) {
@@ -76,8 +90,7 @@ final class InstancesModel: ObservableObject {
     func standardizedURL(_ url: String) -> String {
         if url.count > 7, url.last == "/" {
             return String(url.dropLast())
-        } else {
-            return url
         }
+        return url
     }
 }

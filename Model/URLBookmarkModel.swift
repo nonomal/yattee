@@ -3,7 +3,7 @@ import Logging
 
 struct URLBookmarkModel {
     static let bookmarkPrefix = "urlbookmark-"
-    static var shared = URLBookmarkModel()
+    static var shared = Self()
 
     var logger = Logger(label: "stream.yattee.url-bookmark")
 
@@ -45,7 +45,7 @@ struct URLBookmarkModel {
     func saveBookmark(_ url: NSURL) {
         guard url.isFileURL else {
             logger.error("trying to save bookmark for something that is not a file")
-            logger.error("not a file: \(url.absoluteString)")
+            logger.error("not a file: \(url.absoluteString ?? "unknown")")
             return
         }
 
@@ -114,7 +114,7 @@ struct URLBookmarkModel {
     func refreshAll() {
         logger.info("refreshing all bookmarks")
 
-        allURLs.forEach { url in
+        for url in allURLs {
             if loadBookmark(url) != nil {
                 logger.info("bookmark for \(url) exists")
             } else {

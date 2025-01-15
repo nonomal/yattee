@@ -7,36 +7,36 @@ struct BrowsingSettings: View {
         @Default(.roundedThumbnails) private var roundedThumbnails
     #endif
     @Default(.accountPickerDisplaysAnonymousAccounts) private var accountPickerDisplaysAnonymousAccounts
+    @Default(.showUnwatchedFeedBadges) private var showUnwatchedFeedBadges
+    @Default(.keepChannelsWithUnwatchedFeedOnTop) private var keepChannelsWithUnwatchedFeedOnTop
     #if os(iOS)
-        @Default(.homeRecentDocumentsItems) private var homeRecentDocumentsItems
+        @Default(.enterFullscreenInLandscape) private var enterFullscreenInLandscape
         @Default(.lockPortraitWhenBrowsing) private var lockPortraitWhenBrowsing
         @Default(.showDocuments) private var showDocuments
     #endif
     @Default(.thumbnailsQuality) private var thumbnailsQuality
     @Default(.channelOnThumbnail) private var channelOnThumbnail
     @Default(.timeOnThumbnail) private var timeOnThumbnail
-    @Default(.showHome) private var showHome
-    @Default(.showFavoritesInHome) private var showFavoritesInHome
-    @Default(.showQueueInHome) private var showQueueInHome
-    @Default(.showOpenActionsInHome) private var showOpenActionsInHome
     @Default(.showOpenActionsToolbarItem) private var showOpenActionsToolbarItem
-    @Default(.homeHistoryItems) private var homeHistoryItems
     @Default(.visibleSections) private var visibleSections
+    @Default(.startupSection) private var startupSection
+    @Default(.showSearchSuggestions) private var showSearchSuggestions
     @Default(.playerButtonSingleTapGesture) private var playerButtonSingleTapGesture
     @Default(.playerButtonDoubleTapGesture) private var playerButtonDoubleTapGesture
     @Default(.playerButtonShowsControlButtonsWhenMinimized) private var playerButtonShowsControlButtonsWhenMinimized
     @Default(.playerButtonIsExpanded) private var playerButtonIsExpanded
     @Default(.playerBarMaxWidth) private var playerBarMaxWidth
     @Default(.expandChannelDescription) private var expandChannelDescription
+    @Default(.showChannelAvatarInChannelsLists) private var showChannelAvatarInChannelsLists
+    @Default(.showChannelAvatarInVideosListing) private var showChannelAvatarInVideosListing
 
     @ObservedObject private var accounts = AccountsModel.shared
 
-    @State private var homeHistoryItemsText = ""
     #if os(iOS)
         @State private var homeRecentDocumentsItemsText = ""
     #endif
     #if os(macOS)
-        @State private var presentingEditFavoritesSheet = false
+        @State private var presentingHomeSettingsSheet = false
     #endif
 
     var body: some View {
@@ -56,7 +56,7 @@ struct BrowsingSettings: View {
             #endif
         }
         #if os(tvOS)
-        .frame(maxWidth: 1000)
+        .frame(maxWidth: 1200)
         #else
         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         #endif
@@ -66,95 +66,52 @@ struct BrowsingSettings: View {
     private var sections: some View {
         Group {
             homeSettings
+            if !accounts.isEmpty {
+                startupSectionPicker
+                showSearchSuggestionsToggle
+                visibleSectionsSettings
+            }
             let interface = interfaceSettings
             #if os(tvOS)
                 if !accounts.isEmpty {
                     interface
                 }
             #else
-                playerBarSettings
                 interface
+                playerBarSettings
             #endif
             if !accounts.isEmpty {
                 thumbnailsSettings
-                visibleSectionsSettings
             }
         }
     }
 
-    private var homeSettings: some View {
-        Section(header: SettingsHeader(text: "Home".localized())) {
-            #if !os(tvOS)
-                if !accounts.isEmpty {
-                    Toggle("Show Home", isOn: $showHome)
-                }
-            #endif
-            Toggle("Show Open Videos quick actions", isOn: $showOpenActionsInHome)
-            Toggle("Show Next in Queue", isOn: $showQueueInHome)
-
-            #if os(iOS)
-                HStack {
-                    Text("Recent Documents")
-                    TextField("Recent Documents", text: $homeRecentDocumentsItemsText)
-                        .multilineTextAlignment(.trailing)
-                        .labelsHidden()
-                    #if !os(macOS)
-                        .keyboardType(.numberPad)
-                    #endif
-                        .onAppear {
-                            homeRecentDocumentsItemsText = String(homeRecentDocumentsItems)
-                        }
-                        .onChange(of: homeRecentDocumentsItemsText) { newValue in
-                            homeRecentDocumentsItems = Int(newValue) ?? 3
-                        }
-                }
-            #endif
-
-            HStack {
-                Text("Recent History")
-                TextField("Recent History", text: $homeHistoryItemsText)
-                    .multilineTextAlignment(.trailing)
-                    .labelsHidden()
-                #if !os(macOS)
-                    .keyboardType(.numberPad)
-                #endif
-                    .onAppear {
-                        homeHistoryItemsText = String(homeHistoryItems)
+    @ViewBuilder private var homeSettings: some View {
+        if !accounts.isEmpty {
+            Section {
+                #if os(macOS)
+                    Button {
+                        presentingHomeSettingsSheet = true
+                    } label: {
+                        Text("Home Settings")
                     }
-                    .onChange(of: homeHistoryItemsText) { newValue in
-                        homeHistoryItems = Int(newValue) ?? 10
-                    }
-            }
-
-            if !accounts.isEmpty {
-                Toggle("Show Favorites", isOn: $showFavoritesInHome)
-
-                Group {
-                    #if os(macOS)
-                        Button {
-                            presentingEditFavoritesSheet = true
-                        } label: {
-                            Text("Edit Favorites…")
-                        }
-                        .sheet(isPresented: $presentingEditFavoritesSheet) {
-                            VStack(alignment: .leading) {
-                                Button("Done") {
-                                    presentingEditFavoritesSheet = false
-                                }
-                                .padding()
-                                .keyboardShortcut(.cancelAction)
-
-                                EditFavorites()
+                    .sheet(isPresented: $presentingHomeSettingsSheet) {
+                        VStack(alignment: .leading) {
+                            Button("Done") {
+                                presentingHomeSettingsSheet = false
                             }
-                            .frame(width: 500, height: 300)
+                            .padding()
+                            .keyboardShortcut(.cancelAction)
+
+                            HomeSettings()
                         }
-                    #else
-                        NavigationLink(destination: LazyView(EditFavorites())) {
-                            Text("Edit Favorites…")
-                        }
-                    #endif
-                }
-                .disabled(!showFavoritesInHome)
+                        .frame(width: 500, height: 800)
+                    }
+                #else
+                    NavigationLink(destination: LazyView(HomeSettings())) {
+                        Text("Home Settings")
+                    }
+                #endif
             }
         }
     }
@@ -164,8 +121,8 @@ struct BrowsingSettings: View {
             Section(header: SettingsHeader(text: "Player Bar".localized()), footer: playerBarFooter) {
                 Toggle("Open expanded", isOn: $playerButtonIsExpanded)
                 Toggle("Always show controls buttons", isOn: $playerButtonShowsControlButtonsWhenMinimized)
-                playerBarGesturePicker("Single tap gesture", selection: $playerButtonSingleTapGesture)
-                playerBarGesturePicker("Double tap gesture", selection: $playerButtonDoubleTapGesture)
+                playerBarGesturePicker("Single tap gesture".localized(), selection: $playerButtonSingleTapGesture)
+                playerBarGesturePicker("Double tap gesture".localized(), selection: $playerButtonDoubleTapGesture)
                 HStack {
                     Text("Maximum width expanded")
                     Spacer()
@@ -183,7 +140,7 @@ struct BrowsingSettings: View {
         func playerBarGesturePicker(_ label: String, selection: Binding<PlayerTapGestureAction>) -> some View {
             Picker(label, selection: selection) {
                 ForEach(PlayerTapGestureAction.allCases, id: \.rawValue) { action in
-                    Text(action.label).tag(action)
+                    Text(action.label.localized()).tag(action)
                 }
             }
         }
@@ -207,14 +164,18 @@ struct BrowsingSettings: View {
             #if os(iOS)
                 Toggle("Show Documents", isOn: $showDocuments)
 
-                Toggle("Lock portrait mode", isOn: $lockPortraitWhenBrowsing)
-                    .onChange(of: lockPortraitWhenBrowsing) { lock in
-                        if lock {
-                            Orientation.lockOrientation(.portrait, andRotateTo: .portrait)
-                        } else {
-                            Orientation.lockOrientation(.allButUpsideDown)
+                if Constants.isIPad {
+                    Toggle("Lock portrait mode", isOn: $lockPortraitWhenBrowsing)
+                        .onChange(of: lockPortraitWhenBrowsing) { lock in
+                            if lock {
+                                enterFullscreenInLandscape = true
+                                Orientation.lockOrientation(.portrait, andRotateTo: .portrait)
+                            } else {
+                                enterFullscreenInLandscape = false
+                                Orientation.lockOrientation(.all)
+                            }
                         }
-                    }
+                }
             #endif
 
             if !accounts.isEmpty {
@@ -223,9 +184,20 @@ struct BrowsingSettings: View {
                 #endif
 
                 Toggle("Show anonymous accounts", isOn: $accountPickerDisplaysAnonymousAccounts)
+                Toggle("Show unwatched feed badges", isOn: $showUnwatchedFeedBadges)
+                    .onChange(of: showUnwatchedFeedBadges) { newValue in
+                        if newValue {
+                            FeedModel.shared.calculateUnwatchedFeed()
+                        }
+                    }
+
+                Toggle("Open channels with description expanded", isOn: $expandChannelDescription)
             }
 
-            Toggle("Open channels with description expanded", isOn: $expandChannelDescription)
+            Toggle("Keep channels with unwatched videos on top of subscriptions list", isOn: $keepChannelsWithUnwatchedFeedOnTop)
+
+            Toggle("Show channel avatars in channels lists", isOn: $showChannelAvatarInChannelsLists)
+            Toggle("Show channel avatars in videos lists", isOn: $showChannelAvatarInVideosListing)
         }
     }
 
@@ -251,38 +223,33 @@ struct BrowsingSettings: View {
 
     private var visibleSectionsSettings: some View {
         Section(header: SettingsHeader(text: "Sections".localized())) {
-            #if os(macOS)
-                let list = ForEach(VisibleSection.allCases, id: \.self) { section in
-                    MultiselectRow(
-                        title: section.title,
-                        selected: visibleSections.contains(section)
-                    ) { value in
-                        toggleSection(section, value: value)
-                    }
+            ForEach(VisibleSection.allCases, id: \.self) { section in
+                MultiselectRow(
+                    title: section.title,
+                    selected: visibleSections.contains(section)
+                ) { value in
+                    toggleSection(section, value: value)
                 }
-
-                Group {
-                    if #available(macOS 12.0, *) {
-                        list
-                            .listStyle(.inset(alternatesRowBackgrounds: true))
-                    } else {
-                        list
-                            .listStyle(.inset)
-                    }
-
-                    Spacer()
-                }
-            #else
-                ForEach(VisibleSection.allCases, id: \.self) { section in
-                    MultiselectRow(
-                        title: section.title,
-                        selected: visibleSections.contains(section)
-                    ) { value in
-                        toggleSection(section, value: value)
-                    }
-                }
-            #endif
+            }
         }
+    }
+
+    private var startupSectionPicker: some View {
+        Group {
+            #if os(tvOS)
+                SettingsHeader(text: "Startup section".localized())
+            #endif
+            Picker("Startup section", selection: $startupSection) {
+                ForEach(StartupSection.allCases, id: \.rawValue) { section in
+                    Text(section.label).tag(section)
+                }
+            }
+            .modifier(SettingsPickerModifier())
+        }
+    }
+
+    private var showSearchSuggestionsToggle: some View {
+        Toggle("Show search suggestions", isOn: $showSearchSuggestions)
     }
 
     private func toggleSection(_ section: VisibleSection, value: Bool) {

@@ -13,12 +13,10 @@ struct ControlsBar: View {
     @State private var shareURL: URL?
     @Binding var expansionState: ExpansionState
 
-    @State internal var gestureThrottle = Throttle(interval: 0.25)
+    @State var gestureThrottle = Throttle(interval: 0.25) // swiftlint:disable:this private_swiftui_state
 
     var presentingControls = true
     var backgroundEnabled = true
-    var borderTop = true
-    var borderBottom = true
     var detailsTogglePlayer = true
     var detailsToggleFullScreen = false
     var playerBar = false
@@ -169,6 +167,7 @@ struct ControlsBar: View {
                             channel: model.videoForDisplay?.channel,
                             video: model.videoForDisplay
                         )
+                        .id("channel-avatar-\(model.videoForDisplay?.id ?? "")")
                         .frame(width: barHeight - 10, height: barHeight - 10)
                     }
                     .contextMenu { contextMenu }
@@ -178,12 +177,13 @@ struct ControlsBar: View {
                         channel: model.videoForDisplay?.channel,
                         video: model.videoForDisplay
                     )
+                    .id("channel-avatar-\(model.videoForDisplay?.id ?? "")")
                     #if !os(tvOS)
-                    .highPriorityGesture(playerButtonDoubleTapGesture != .nothing ? doubleTapGesture : nil)
-                    .gesture(playerButtonSingleTapGesture != .nothing ? singleTapGesture : nil)
+                        .highPriorityGesture(playerButtonDoubleTapGesture != .nothing ? doubleTapGesture : nil)
+                        .gesture(playerButtonSingleTapGesture != .nothing ? singleTapGesture : nil)
                     #endif
-                    .frame(width: barHeight - 10, height: barHeight - 10)
-                    .contextMenu { contextMenu }
+                        .frame(width: barHeight - 10, height: barHeight - 10)
+                        .contextMenu { contextMenu }
                 }
 
                 if expansionState == .full {

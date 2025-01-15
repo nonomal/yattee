@@ -1,3 +1,4 @@
+import Combine
 import Defaults
 import SwiftUI
 
@@ -28,13 +29,7 @@ struct PlaybackSettings: View {
     #endif
 
     var body: some View {
-        #if DEBUG
-            // TODO: remove
-            if #available(iOS 15.0, macOS 12.0, *) {
-                Self._printChanges()
-            }
-        #endif
-        return ScrollView {
+        ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Button {
@@ -43,9 +38,6 @@ struct PlaybackSettings: View {
                         }
                     } label: {
                         Label("Close", systemImage: "xmark")
-                            .imageScale(.large)
-                            .padding(.vertical)
-
                         #if os(iOS)
                             .labelStyle(.iconOnly)
                             .frame(maxWidth: 50, alignment: .leading)
@@ -63,24 +55,33 @@ struct PlaybackSettings: View {
                 }
 
                 HStack {
-                    controlsHeader("Rate")
+                    controlsHeader("Playback Mode".localized())
                     Spacer()
-                    HStack(spacing: rateButtonsSpacing) {
-                        decreaseRateButton
-                        #if os(tvOS)
-                        .focused($focusedField, equals: .decreaseRate)
-                        #endif
-                        rateButton
-                        increaseRateButton
-                        #if os(tvOS)
-                        .focused($focusedField, equals: .increaseRate)
-                        #endif
+                    playbackModeControl
+                }
+                .padding(.vertical, 10)
+
+                if player.activeBackend == .mpv || !player.avPlayerUsesSystemControls {
+                    HStack {
+                        controlsHeader("Rate".localized())
+                        Spacer()
+                        HStack(spacing: rateButtonsSpacing) {
+                            decreaseRateButton
+                            #if os(tvOS)
+                            .focused($focusedField, equals: .decreaseRate)
+                            #endif
+                            rateButton
+                            increaseRateButton
+                            #if os(tvOS)
+                            .focused($focusedField, equals: .increaseRate)
+                            #endif
+                        }
                     }
                 }
 
                 if player.activeBackend == .mpv {
                     HStack {
-                        controlsHeader("Captions")
+                        controlsHeader("Captions".localized())
                         Spacer()
                         captionsButton
                         #if os(tvOS)
@@ -142,7 +143,6 @@ struct PlaybackSettings: View {
         }
         .animation(nil, value: player.activeBackend)
         .frame(alignment: .topLeading)
-
         .ignoresSafeArea(.all, edges: .bottom)
         .backport
         .playbackSettingsPresentationDetents()
@@ -235,7 +235,6 @@ struct PlaybackSettings: View {
             #if os(iOS)
                 .padding(12)
                 .frame(width: 40, height: 40)
-
                 .background(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.accentColor, lineWidth: 1))
                 .contentShape(Rectangle())
             #endif
@@ -261,7 +260,6 @@ struct PlaybackSettings: View {
             #if os(iOS)
                 .padding(12)
                 .frame(width: 40, height: 40)
-
                 .background(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.accentColor, lineWidth: 1))
                 .contentShape(Rectangle())
             #endif
@@ -279,6 +277,40 @@ struct PlaybackSettings: View {
         #else
             8
         #endif
+    }
+
+    @ViewBuilder var playbackModeControl: some View {
+        #if os(tvOS)
+            Button {
+                player.playbackMode = player.playbackMode.next()
+            } label: {
+                Label(player.playbackMode.description.localized(), systemImage: player.playbackMode.systemImage)
+                    .transaction { t in t.animation = nil }
+                    .frame(minWidth: 350)
+            }
+        #elseif os(macOS)
+            playbackModePicker
+                .modifier(SettingsPickerModifier())
+            #if os(macOS)
+                .frame(maxWidth: 150)
+            #endif
+        #else
+            Menu {
+                playbackModePicker
+            } label: {
+                Label(player.playbackMode.description.localized(), systemImage: player.playbackMode.systemImage)
+            }
+            .transaction { t in t.animation = .none }
+        #endif
+    }
+
+    var playbackModePicker: some View {
+        Picker("Playback Mode", selection: $player.playbackMode) {
+            ForEach(PlayerModel.PlaybackMode.allCases, id: \.rawValue) { mode in
+                Label(mode.description.localized(), systemImage: mode.systemImage).tag(mode)
+            }
+        }
+        .labelsHidden()
     }
 
     @ViewBuilder private var qualityProfileButton: some View {
@@ -352,23 +384,35 @@ struct PlaybackSettings: View {
     }
 
     @ViewBuilder private var captionsButton: some View {
+        let videoCaptions = player.currentVideo?.captions
         #if os(macOS)
             captionsPicker
                 .labelsHidden()
                 .frame(maxWidth: 300)
         #elseif os(iOS)
             Menu {
-                captionsPicker
+                if videoCaptions?.isEmpty == false {
+                    captionsPicker
+                }
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "text.bubble")
-                    if let captions = player.captions {
-                        Text(captions.code)
+                    if let captions = player.captions,
+                       let language = LanguageCodes(rawValue: captions.code)
+                    {
+                        Text("\(language.description.capitalized) (\(language.rawValue))")
                             .foregroundColor(.accentColor)
+                    } else {
+                        if videoCaptions?.isEmpty == true {
+                            Text("Not available")
+                        } else {
+                            Text("Disabled")
+                        }
                     }
                 }
                 .frame(alignment: .trailing)
                 .frame(height: 40)
+                .disabled(videoCaptions?.isEmpty == true)
             }
             .transaction { t in t.animation = .none }
             .buttonStyle(.plain)
@@ -397,14 +441,14 @@ struct PlaybackSettings: View {
 
     @ViewBuilder private var captionsPicker: some View {
         let captions = player.currentVideo?.captions ?? []
-        Picker("Captions", selection: $player.captions) {
+        Picker("Captions".localized(), selection: $player.captions) {
             if captions.isEmpty {
-                Text("Not available")
+                Text("Not available").tag(Captions?.none)
             } else {
                 Text("Disabled").tag(Captions?.none)
-            }
-            ForEach(captions) { caption in
-                Text(caption.description).tag(Optional(caption))
+                ForEach(captions) { caption in
+                    Text(caption.description).tag(Optional(caption))
+                }
             }
         }
         .disabled(captions.isEmpty)

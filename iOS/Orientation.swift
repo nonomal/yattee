@@ -1,9 +1,8 @@
 import CoreMotion
-import Defaults
 import Logging
 import UIKit
 
-struct Orientation {
+enum Orientation {
     static var logger = Logger(label: "stream.yattee.orientation")
 
     static func lockOrientation(_ orientation: UIInterfaceOrientationMask) {
@@ -31,11 +30,11 @@ struct Orientation {
         logger.info("rotating to \(orientationString)")
 
         if #available(iOS 16, *) {
-            guard let windowScene = SafeArea.scene else { return }
+            guard let windowScene = Self.scene else { return }
             let rotateOrientationMask = rotateOrientation == .portrait ? UIInterfaceOrientationMask.portrait :
                 rotateOrientation == .landscapeLeft ? .landscapeLeft :
                 rotateOrientation == .landscapeRight ? .landscapeRight :
-                .allButUpsideDown
+                .all
 
             windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: rotateOrientationMask)) { error in
                 print("denied rotation \(error)")
@@ -45,5 +44,12 @@ struct Orientation {
         }
 
         UINavigationController.attemptRotationToDeviceOrientation()
+    }
+
+    private static var scene: UIWindowScene? {
+        UIApplication.shared.connectedScenes
+            .filter { $0.activationState == .foregroundActive }
+            .compactMap { $0 as? UIWindowScene }
+            .first
     }
 }

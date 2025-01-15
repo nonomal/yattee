@@ -3,8 +3,11 @@ import SwiftUI
 struct AccentButton: View {
     var text: String?
     var imageSystemName: String?
-    var maxWidth: CGFloat? = .infinity
+    var maxWidth: CGFloat? = .infinity // swiftlint:disable:this no_cgfloat
     var bold = true
+    var verticalPadding = 10.0
+    var horizontalPadding = 10.0
+    var minHeight = 45.0
     var action: () -> Void = {}
 
     var body: some View {
@@ -18,15 +21,17 @@ struct AccentButton: View {
                         .fontWeight(bold ? .bold : .regular)
                 }
             }
-            .padding(.vertical, 10)
-            .padding(.horizontal, 10)
-            .frame(minHeight: 45)
+            .padding(.vertical, verticalPadding)
+            .padding(.horizontal, horizontalPadding)
+            .frame(minHeight: minHeight)
             .frame(maxWidth: maxWidth)
             .contentShape(Rectangle())
         }
+        #if !os(tvOS)
         .foregroundColor(.accentColor)
         .buttonStyle(.plain)
         .background(buttonBackground)
+        #endif
     }
 
     var buttonBackground: some View {
@@ -37,6 +42,11 @@ struct AccentButton: View {
 
 struct OpenVideosButton_Previews: PreviewProvider {
     static var previews: some View {
-        AccentButton(text: "Open Videos", imageSystemName: "play.circle.fill")
+        VStack {
+            AccentButton(text: "Open Videos", imageSystemName: "play.circle.fill")
+                .padding(.horizontal, 100)
+            AccentButton(text: "Open Videos", imageSystemName: "play.circle.fill")
+                .padding(.horizontal, 100)
+        }
     }
 }

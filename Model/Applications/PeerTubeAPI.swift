@@ -284,7 +284,7 @@ final class PeerTubeAPI: Service, ObservableObject, VideosAPI {
             .onCompletion { _ in onCompletion() }
     }
 
-    func channel(_ id: String, contentType: Channel.ContentType, data _: String?) -> Resource {
+    func channel(_ id: String, contentType: Channel.ContentType, data _: String?, page _: String?) -> Resource {
         if contentType == .playlists {
             return resource(baseURL: account.url, path: basePathAppending("channels/\(id)/playlists"))
         }
@@ -392,7 +392,7 @@ final class PeerTubeAPI: Service, ObservableObject, VideosAPI {
     }
 
     func search(_ query: SearchQuery, page _: String?) -> Resource {
-        var resource = resource(baseURL: account.url, path: basePathAppending("search/videos"))
+        resource(baseURL: account.url, path: basePathAppending("search/videos"))
             .withParam("search", query.query)
 //            .withParam("sort_by", query.sortBy.parameter)
 //            .withParam("type", "all")
@@ -409,7 +409,7 @@ final class PeerTubeAPI: Service, ObservableObject, VideosAPI {
 //            resource = resource.withParam("page", page)
 //        }
 
-        return resource
+//        return resource
     }
 
     func searchSuggestions(query: String) -> Resource {
@@ -515,7 +515,8 @@ final class PeerTubeAPI: Service, ObservableObject, VideosAPI {
             .dictionaryValue["files"]?.arrayValue.first?
             .dictionaryValue["fileUrl"]?.url
         {
-            streams.append(SingleAssetStream(instance: account.instance, avAsset: AVURLAsset(url: fileURL), resolution: .hd720p30, kind: .stream))
+            let resolution = Stream.Resolution.predefined(.hd720p30)
+            streams.append(SingleAssetStream(instance: account.instance, avAsset: AVURLAsset(url: fileURL), resolution: resolution, kind: .stream))
         }
 
         return streams

@@ -35,24 +35,22 @@ final class CommentsModel: ObservableObject {
 
     func load(page: String? = nil) {
         guard let video = player.currentVideo else { return }
+        guard firstPage || nextPageAvailable else { return }
 
-        if !firstPage && !nextPageAvailable {
-            return
-        }
-
-        firstPage = page.isNil || page!.isEmpty
-
-        player.playerAPI(video)?.comments(video.videoID, page: page)?
+        player
+            .playerAPI(video)?
+            .comments(video.videoID, page: page)?
             .load()
             .onSuccess { [weak self] response in
-                if let page: CommentsPage = response.typedContent() {
-                    self?.all += page.comments
-                    self?.nextPage = page.nextPage
-                    self?.disabled = page.disabled
+                guard let self else { return }
+                if let commentsPage: CommentsPage = response.typedContent() {
+                    self.all += commentsPage.comments
+                    self.nextPage = commentsPage.nextPage
+                    self.disabled = commentsPage.disabled
                 }
             }
-            .onFailure { [weak self] requestError in
-                self?.disabled = !requestError.json.dictionaryValue["error"].isNil
+            .onFailure { [weak self] _ in
+                self?.disabled = true
             }
             .onCompletion { [weak self] _ in
                 self?.loaded = true
@@ -67,6 +65,7 @@ final class CommentsModel: ObservableObject {
     }
 
     func loadNextPage() {
+        guard nextPageAvailable else { return }
         load(page: nextPage)
     }
 

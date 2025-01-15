@@ -39,7 +39,9 @@ final class RecentsModel: ObservableObject {
 
     func addQuery(_ query: String) {
         if !query.isEmpty {
-            NavigationModel.shared.tabSelection = .search
+            if NavigationModel.shared.tabSelection != .search {
+                NavigationModel.shared.tabSelection = .search
+            }
             add(.init(from: query))
         }
     }
@@ -58,6 +60,12 @@ final class RecentsModel: ObservableObject {
         }
 
         return nil
+    }
+
+    var presentedItem: RecentItem? {
+        guard let recent = items.last else { return nil }
+
+        return recent
     }
 
     static func symbolSystemImage(_ name: String) -> String {

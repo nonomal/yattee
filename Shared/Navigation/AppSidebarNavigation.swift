@@ -1,11 +1,10 @@
 import Defaults
 import SwiftUI
 #if os(iOS)
-    import Introspect
+    import SwiftUIIntrospect
 #endif
 
 struct AppSidebarNavigation: View {
-    @ObservedObject private var accounts = AccountsModel.shared
     private var navigation: NavigationModel { .shared }
 
     #if os(iOS)
@@ -16,7 +15,7 @@ struct AppSidebarNavigation: View {
 
     var body: some View {
         #if os(iOS)
-            content.introspectViewController { viewController in
+            content.introspect(.viewController, on: .iOS(.v15, .v16, .v17, .v18)) { viewController in
                 // workaround for an empty supplementary view on launch
                 // the supplementary view is determined by the default selection inside the
                 // primary view, but the primary view is not loaded so its selection is not read

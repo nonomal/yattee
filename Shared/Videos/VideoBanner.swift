@@ -15,6 +15,8 @@ struct VideoBanner: View {
     @Default(.watchedVideoStyle) private var watchedVideoStyle
     @Default(.watchedVideoBadgeColor) private var watchedVideoBadgeColor
     @Default(.timeOnThumbnail) private var timeOnThumbnail
+    @Default(.roundedThumbnails) private var roundedThumbnails
+    @Default(.showChannelAvatarInVideosListing) private var showChannelAvatarInVideosListing
 
     @Environment(\.inChannelView) private var inChannelView
     @Environment(\.inNavigationView) private var inNavigationView
@@ -37,7 +39,15 @@ struct VideoBanner: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .trailing, spacing: 2) {
-                smallThumbnail
+                ZStack(alignment: .bottom) {
+                    smallThumbnail
+                        .layoutPriority(1)
+
+                    ProgressView(value: watch?.progress ?? 44, total: 100)
+                        .frame(maxHeight: 4)
+                        .progressViewStyle(LinearProgressViewStyle(tint: Color("AppRedColor")))
+                        .opacity(watch?.isShowingProgress ?? false ? 1 : 0)
+                }
 
                 if !timeOnThumbnail, let timeLabel {
                     Text(timeLabel)
@@ -76,10 +86,9 @@ struct VideoBanner: View {
                                     if !inChannelView, !video.isLocal || video.localStreamIsRemoteURL {
                                         ChannelLinkView(channel: video.channel) {
                                             HStack(spacing: Constants.channelDetailsStackSpacing) {
-                                                if let url = video.channel.thumbnailURLOrCached, video != .fixture {
-                                                    ThumbnailView(url: url)
+                                                if video != .fixture, showChannelAvatarInVideosListing {
+                                                    ChannelAvatarView(channel: video.channel)
                                                         .frame(width: Constants.channelThumbnailSize, height: Constants.channelThumbnailSize)
-                                                        .clipShape(Circle())
                                                 }
 
                                                 channelLabel
@@ -133,6 +142,14 @@ struct VideoBanner: View {
             .contentShape(Rectangle())
     }
 
+    private var thumbnailRoundingCornerRadius: Double {
+        #if os(tvOS)
+            return Double(12)
+        #else
+            return Double(roundedThumbnails ? 6 : 0)
+        #endif
+    }
+
     private var extraAttributes: some View {
         HStack(spacing: 16) {
             if let video {
@@ -184,20 +201,17 @@ struct VideoBanner: View {
 
             if timeOnThumbnail {
                 timeView
+                    .offset(y: watch?.isShowingProgress ?? false ? -4 : 0)
             }
         }
         .frame(width: thumbnailWidth, height: thumbnailHeight)
-        #if os(tvOS)
-            .mask(RoundedRectangle(cornerRadius: 12))
-        #else
-            .mask(RoundedRectangle(cornerRadius: 6))
-        #endif
+        .mask(RoundedRectangle(cornerRadius: thumbnailRoundingCornerRadius))
     }
 
     private var contentOpacity: Double {
         guard saveHistory,
               !watch.isNil,
-              watchedVideoStyle == .decreasedOpacity || watchedVideoStyle == .both
+              watchedVideoStyle.isDecreasingOpacity
         else {
             return 1
         }
@@ -205,20 +219,16 @@ struct VideoBanner: View {
         return watch!.finished ? 0.5 : 1
     }
 
-    private var thumbnailWidth: Double {
-        #if os(tvOS)
-            356
-        #else
-            120
-        #endif
-    }
-
     private var thumbnailHeight: Double {
         #if os(tvOS)
             200
         #else
-            72
+            75
         #endif
+    }
+
+    private var thumbnailWidth: Double {
+        thumbnailHeight * Constants.aspectRatio16x9
     }
 
     private var videoDurationLabel: String? {
@@ -239,11 +249,11 @@ struct VideoBanner: View {
     private var timeLabel: String? {
         if let watch, let watchStoppedAtLabel, let videoDurationLabel, !watch.finished {
             return "\(watchStoppedAtLabel) / \(videoDurationLabel)"
-        } else if let videoDurationLabel {
-            return videoDurationLabel
-        } else {
-            return nil
         }
+        if let videoDurationLabel {
+            return videoDurationLabel
+        }
+        return nil
     }
 
     @ViewBuilder private var timeView: some View {
@@ -274,7 +284,7 @@ struct VideoBanner: View {
 
 struct VideoBanner_Previews: PreviewProvider {
     static var previews: some View {
-        VStack(spacing: 2) {
+        ScrollView {
             VideoBanner(video: Video.fixture, playbackTime: CMTime(seconds: 400, preferredTimescale: 10000))
             VideoBanner(video: Video.fixtureUpcomingWithoutPublishedOrViews)
             VideoBanner(video: .local(URL(string: "https://apple.com/a/directory/of/video+that+has+very+long+title+that+will+likely.mp4")!))

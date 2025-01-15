@@ -53,24 +53,15 @@ struct Account: Defaults.Serializable, Hashable, Identifiable {
     }
 
     var instance: Instance! {
-        Defaults[.instances].first { $0.id == instanceID } ?? Instance(app: app ?? .invidious, name: urlString, apiURLString: urlString)
+        InstancesModel.shared.find(instanceID) ?? Instance(app: app ?? .invidious, name: urlString, apiURLString: urlString)
     }
 
     var isPublic: Bool {
         instanceID.isNil
     }
 
-    var shortUsername: String {
-        let (username, _) = credentials
-
-        guard let username,
-              username.count > 10
-        else {
-            return username ?? ""
-        }
-
-        let index = username.index(username.startIndex, offsetBy: 11)
-        return String(username[..<index])
+    var isPublicAddedToCustom: Bool {
+        InstancesModel.shared.findByURLString(urlString) != nil
     }
 
     var description: String {
@@ -78,11 +69,8 @@ struct Account: Defaults.Serializable, Hashable, Identifiable {
             return name
         }
 
-        guard !name.isEmpty else {
-            return shortUsername
-        }
-
-        return name
+        let (username, _) = credentials
+        return username ?? name
     }
 
     var urlHost: String {

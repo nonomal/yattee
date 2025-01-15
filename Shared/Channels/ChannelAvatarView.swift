@@ -9,28 +9,34 @@ struct ChannelAvatarView: View {
     @ObservedObject private var accounts = AccountsModel.shared
     @ObservedObject private var subscribedChannels = SubscribedChannelsModel.shared
 
+    @State private var url: URL?
+    @State private var loaded = false
+
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             Group {
                 Group {
-                    if let url = channel?.thumbnailURLOrCached {
+                    if let url {
                         ThumbnailView(url: url)
                     } else {
                         ZStack {
-                            Color(white: 0.6)
-                                .opacity(0.5)
-
-                            Group {
-                                if let video, video.isLocal {
-                                    Image(systemName: video.localStreamImageSystemName)
-                                } else {
-                                    Image(systemName: "play.rectangle")
-                                }
+                            if loaded {
+                                Image(systemName: "person.circle")
+                                    .imageScale(.large)
+                                    .foregroundColor(.accentColor)
+                            } else {
+                                Color("PlaceholderColor")
                             }
-                            .foregroundColor(.accentColor)
-                            .font(.system(size: 20))
-                            .contentShape(Rectangle())
+
+                            if let video, video.isLocal {
+                                Image(systemName: video.localStreamImageSystemName)
+                                    .foregroundColor(.accentColor)
+                                    .font(.system(size: 20))
+                                    .contentShape(Rectangle())
+                                    .imageScale(.small)
+                            }
                         }
+                        .onAppear(perform: updateURL)
                     }
                 }
                 .clipShape(Circle())
@@ -49,10 +55,21 @@ struct ChannelAvatarView: View {
                     #endif
                         .clipShape(Circle())
                         .foregroundColor(.secondary)
+                        .imageScale(.small)
                 }
             }
         }
-        .imageScale(.small)
+    }
+
+    func updateURL() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            if let url = channel?.thumbnailURLOrCached {
+                DispatchQueue.main.async {
+                    self.url = url
+                }
+            }
+            self.loaded = true
+        }
     }
 }
 

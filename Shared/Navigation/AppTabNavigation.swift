@@ -6,13 +6,14 @@ struct AppTabNavigation: View {
     @ObservedObject private var navigation = NavigationModel.shared
     private var player = PlayerModel.shared
     @ObservedObject private var feed = FeedModel.shared
-    @ObservedObject private var subscriptions = SubscribedChannelsModel.shared
     @ObservedObject private var feedCount = UnwatchedFeedCountModel.shared
+    private var recents = RecentsModel.shared
 
     @Default(.showHome) private var showHome
     @Default(.showDocuments) private var showDocuments
     @Default(.showOpenActionsToolbarItem) private var showOpenActionsToolbarItem
     @Default(.visibleSections) private var visibleSections
+    @Default(.showUnwatchedFeedBadges) private var showUnwatchedFeedBadges
 
     let persistenceController = PersistenceController.shared
 
@@ -95,7 +96,7 @@ struct AppTabNavigation: View {
         }
         .tag(TabSelection.subscriptions)
         .backport
-        .badge(feedCount.unwatchedText)
+        .badge(showUnwatchedFeedBadges ? feedCount.unwatchedText : nil)
     }
 
     private var subscriptionsVisible: Bool {
@@ -175,9 +176,9 @@ struct AppTabNavigation: View {
     }
 
     @ViewBuilder private var channelView: some View {
-        if navigation.presentingChannel {
+        if navigation.presentingChannel, let channel = recents.presentedChannel {
             NavigationView {
-                ChannelVideosView(showCloseButton: true)
+                ChannelVideosView(channel: channel, showCloseButton: true)
             }
             .environment(\.managedObjectContext, persistenceController.container.viewContext)
             .environment(\.inChannelView, true)
@@ -189,9 +190,9 @@ struct AppTabNavigation: View {
     }
 
     @ViewBuilder private var playlistView: some View {
-        if navigation.presentingPlaylist {
+        if navigation.presentingPlaylist, let playlist = recents.presentedPlaylist {
             NavigationView {
-                ChannelPlaylistView(showCloseButton: true)
+                ChannelPlaylistView(playlist: playlist, showCloseButton: true)
             }
             .environment(\.managedObjectContext, persistenceController.container.viewContext)
             .id("channelPlaylist")

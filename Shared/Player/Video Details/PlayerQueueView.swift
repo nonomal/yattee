@@ -11,15 +11,16 @@ struct PlayerQueueView: View {
     @ObservedObject private var player = PlayerModel.shared
 
     @Default(.saveHistory) private var saveHistory
+    @Default(.showRelated) private var showRelated
 
     var body: some View {
-        List {
+        Group {
             Group {
                 if player.playbackMode == .related {
                     autoplaying
                 }
                 playingNext
-                if sidebarQueue {
+                if sidebarQueue, showRelated {
                     related
                 }
             }
@@ -34,15 +35,6 @@ struct PlayerQueueView: View {
                 .listRowSeparator(false)
         }
         .environment(\.inNavigationView, false)
-        #if os(macOS)
-            .listStyle(.inset)
-        #elseif os(iOS)
-            .listStyle(.grouped)
-            .backport
-            .scrollContentBackground(false)
-        #else
-            .listStyle(.plain)
-        #endif
     }
 
     @ViewBuilder var autoplaying: some View {
@@ -65,6 +57,8 @@ struct PlayerQueueView: View {
     var autoplayingHeader: some View {
         HStack {
             Text("Autoplaying Next")
+                .foregroundColor(.secondary)
+                .font(.caption)
             Spacer()
             Button {
                 player.setRelatedAutoplayItem()
@@ -78,7 +72,7 @@ struct PlayerQueueView: View {
     }
 
     var playingNext: some View {
-        Section(header: Text("Queue")) {
+        Section(header: queueHeader) {
             if player.queue.isEmpty {
                 Text("Queue is empty")
                     .foregroundColor(.secondary)
@@ -94,6 +88,14 @@ struct PlayerQueueView: View {
                     }
             }
         }
+    }
+
+    var queueHeader: some View {
+        Text(sidebarQueue ? "Queue".localized() : "")
+        #if !os(macOS)
+            .foregroundColor(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        #endif
     }
 
     private var visibleWatches: [Watch] {

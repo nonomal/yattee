@@ -4,7 +4,7 @@ import Logging
 import SwiftyJSON
 
 struct PlaylistsCacheModel: CacheModel {
-    static let shared = PlaylistsCacheModel()
+    static let shared = Self()
     static let limit = 30
     let logger = Logger(label: "stream.yattee.cache.playlists")
 
@@ -14,6 +14,7 @@ struct PlaylistsCacheModel: CacheModel {
     let storage = try? Storage<String, JSON>(
         diskConfig: Self.diskConfig,
         memoryConfig: Self.memoryConfig,
+        fileManager: FileManager.default,
         transformer: BaseCacheModel.jsonTransformer
     )
 
@@ -21,7 +22,7 @@ struct PlaylistsCacheModel: CacheModel {
         let date = iso8601DateFormatter.string(from: Date())
         logger.info("caching \(playlistCacheKey(account)) -- \(date)")
         let feedTimeObject: JSON = ["date": date]
-        let playlistsObject: JSON = ["playlists": playlists.map { $0.json.object }]
+        let playlistsObject: JSON = ["playlists": playlists.map(\.json.object)]
         try? storage?.setObject(feedTimeObject, forKey: playlistTimeCacheKey(account))
         try? storage?.setObject(playlistsObject, forKey: playlistCacheKey(account))
     }

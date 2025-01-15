@@ -65,9 +65,11 @@ public class OrientationTracker {
             guard newDeviceOrientation != self.currentDeviceOrientation else { return }
             self.currentDeviceOrientation = newDeviceOrientation
 
-            NotificationCenter.default.post(name: Self.deviceOrientationChangedNotification,
-                                            object: nil,
-                                            userInfo: nil)
+            NotificationCenter.default.post(
+                name: Self.deviceOrientationChangedNotification,
+                object: nil,
+                userInfo: nil
+            )
         }
     }
 
@@ -79,14 +81,18 @@ public class OrientationTracker {
         let threshold = 0.55
         if accelerometerData.acceleration.x >= threshold {
             return .landscapeLeft
-        } else if accelerometerData.acceleration.x <= -threshold {
-            return .landscapeRight
-        } else if accelerometerData.acceleration.y <= -threshold {
-            return .portrait
-        } else if accelerometerData.acceleration.y >= threshold {
-            return .portraitUpsideDown
-        } else {
-            return currentDeviceOrientation
         }
+        if accelerometerData.acceleration.x <= -threshold {
+            return .landscapeRight
+        }
+        if accelerometerData.acceleration.y <= -threshold {
+            return .portrait
+        }
+
+        if UIDevice.current.userInterfaceIdiom == .pad && accelerometerData.acceleration.y >= threshold {
+            return .portraitUpsideDown
+        }
+
+        return currentDeviceOrientation
     }
 }

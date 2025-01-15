@@ -61,7 +61,8 @@ final class AppleAVPlayerViewController: UIViewController {
         _ sections: [NowPlayingView.ViewSection],
         title: String
     ) -> UIHostingController<AnyView> {
-        let controller = UIHostingController(rootView:
+        let controller = UIHostingController(
+            rootView:
             AnyView(
                 NowPlayingView(sections: sections, inInfoViewController: true)
                     .frame(maxHeight: 600)
@@ -93,15 +94,17 @@ extension AppleAVPlayerViewController: AVPlayerViewControllerDelegate {
 
     func playerViewControllerDidEndDismissalTransition(_: AVPlayerViewController) {}
 
-    func playerViewController(
-        _: AVPlayerViewController,
-        willBeginFullScreenPresentationWithAnimationCoordinator _: UIViewControllerTransitionCoordinator
-    ) {}
+    #if os(iOS)
+        func playerViewController(
+            _: AVPlayerViewController,
+            willBeginFullScreenPresentationWithAnimationCoordinator _: UIViewControllerTransitionCoordinator
+        ) {}
 
-    func playerViewController(
-        _: AVPlayerViewController,
-        willEndFullScreenPresentationWithAnimationCoordinator _: UIViewControllerTransitionCoordinator
-    ) {}
+        func playerViewController(
+            _: AVPlayerViewController,
+            willEndFullScreenPresentationWithAnimationCoordinator _: UIViewControllerTransitionCoordinator
+        ) {}
+    #endif
 
     func playerViewController(
         _: AVPlayerViewController,

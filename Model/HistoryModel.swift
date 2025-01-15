@@ -10,18 +10,21 @@ extension PlayerModel {
         historyVideos.first { $0.videoID == id }
     }
 
-    func loadHistoryVideoDetails(_ watch: Watch) {
+    func loadHistoryVideoDetails(_ watch: Watch, onCompletion: @escaping () -> Void = {}) {
         guard historyVideo(watch.videoID).isNil else {
+            onCompletion()
             return
         }
 
         if !Video.VideoID.isValid(watch.videoID), let url = URL(string: watch.videoID) {
             historyVideos.append(.local(url))
+            onCompletion()
             return
         }
 
         if let video = VideosCacheModel.shared.retrieveVideo(watch.video.cacheKey) {
             historyVideos.append(video)
+            onCompletion()
             return
         }
 
@@ -35,6 +38,7 @@ extension PlayerModel {
                 if let video: Video = response.typedContent() {
                     VideosCacheModel.shared.storeVideo(video)
                     self.historyVideos.append(video)
+                    onCompletion()
                 }
             }
             .onCompletion { _ in
@@ -42,13 +46,12 @@ extension PlayerModel {
             }
     }
 
-    func updateWatch(finished: Bool = false) {
-        guard let currentVideo, saveHistory else { return }
+    func updateWatch(finished: Bool = false, time: CMTime? = nil) {
+        guard let currentVideo, saveHistory, isPlaying else { return }
 
         let id = currentVideo.videoID
-        let time = backend.currentTime
+        let time = time ?? backend.currentTime
         let seconds = time?.seconds ?? 0
-        let duration = playerTime.duration.seconds
         if seconds < 3 {
             return
         }
@@ -59,13 +62,13 @@ extension PlayerModel {
         let results = try? backgroundContext.fetch(watchFetchRequest)
 
         backgroundContext.perform { [weak self] in
-            guard let self, finished || self.backend.isPlaying else {
+            guard let self, finished || time != nil || self.backend.isPlaying else {
                 return
             }
 
             let watch: Watch!
 
-            let duration = self.playerTime.duration.seconds
+            let duration = self.activeBackend == .mpv ? self.playerTime.duration.seconds : self.avPlayerBackend.playerItemDuration?.seconds ?? 0
 
             if results?.isEmpty ?? true {
                 watch = Watch(context: self.backgroundContext)
@@ -107,13 +110,19 @@ extension PlayerModel {
             try? self.context.save()
 
             FeedModel.shared.calculateUnwatchedFeed()
+            WatchModel.shared.watchesChanged()
         }
     }
 
     func removeAllWatches() {
         let watchesFetchRequest = NSFetchRequest<NSFetchRequestResult>(entityName: "Watch")
         let deleteRequest = NSBatchDeleteRequest(fetchRequest: watchesFetchRequest)
-        _ = try? context.execute(deleteRequest)
-        _ = try? context.save()
+
+        do {
+            try context.executeAndMergeChanges(deleteRequest)
+            try context.save()
+        } catch let error as NSError {
+            logger.info(.init(stringLiteral: error.localizedDescription))
+        }
     }
 }

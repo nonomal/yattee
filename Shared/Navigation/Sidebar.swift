@@ -12,6 +12,8 @@ struct Sidebar: View {
     #if os(iOS)
         @Default(.showDocuments) private var showDocuments
     #endif
+    @Default(.showUnwatchedFeedBadges) private var showUnwatchedFeedBadges
+    @Default(.showRecents) private var showRecents
 
     var body: some View {
         ScrollViewReader { scrollView in
@@ -19,8 +21,10 @@ struct Sidebar: View {
                 mainNavigationLinks
 
                 if !accounts.isEmpty {
-                    AppSidebarRecents()
-                        .id("recentlyOpened")
+                    if showRecents {
+                        AppSidebarRecents()
+                            .id("recentlyOpened")
+                    }
 
                     if accounts.api.signedIn {
                         if visibleSections.contains(.subscriptions), accounts.app.supportsSubscriptions {
@@ -34,7 +38,9 @@ struct Sidebar: View {
                 }
             }
             .onChange(of: navigation.sidebarSectionChanged) { _ in
-                scrollScrollViewToItem(scrollView: scrollView, for: navigation.tabSelection)
+                if let tabSelection = navigation.tabSelection {
+                    scrollScrollViewToItem(scrollView: scrollView, for: tabSelection)
+                }
             }
             .listStyle(.sidebar)
         }
@@ -79,7 +85,7 @@ struct Sidebar: View {
                             .accessibility(label: Text("Subscriptions"))
                     }
                     .backport
-                    .badge(feedCount.unwatchedText)
+                    .badge(showUnwatchedFeedBadges ? feedCount.unwatchedText : nil)
                     .contextMenu {
                         playUnwatchedButton
                         toggleWatchedButton
@@ -147,11 +153,14 @@ struct Sidebar: View {
         }
     }
 
-    private func scrollScrollViewToItem(scrollView: ScrollViewProxy, for selection: TabSelection) {
+    private func scrollScrollViewToItem(scrollView: ScrollViewProxy, for selection: TabSelection!) {
+        guard let selection else { return }
+
         if case .recentlyOpened = selection {
             scrollView.scrollTo("recentlyOpened")
             return
-        } else if case let .playlist(id) = selection {
+        }
+        if case let .playlist(id) = selection {
             scrollView.scrollTo(id)
             return
         }

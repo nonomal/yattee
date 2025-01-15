@@ -47,15 +47,15 @@ final class PlayerModel: ObservableObject {
 
     static var shared = PlayerModel()
 
-    let logger = Logger(label: "stream.yattee.app")
+    let logger = Logger(label: "stream.yattee.player.model")
 
-    var avPlayerView = AppleAVPlayerView()
     var playerItem: AVPlayerItem?
 
     var mpvPlayerView = MPVPlayerView()
 
     @Published var presentingPlayer = false { didSet { handlePresentationChange() } }
     @Published var activeBackend = PlayerBackendType.mpv
+    @Published var forceBackendOnPlay: PlayerBackendType?
 
     var avPlayerBackend = AVPlayerBackend()
     var mpvBackend = MPVBackend()
@@ -76,6 +76,8 @@ final class PlayerModel: ObservableObject {
         }
     }
 
+    var previousActiveBackend: PlayerBackendType?
+
     lazy var playerBackendView = PlayerBackendView()
 
     @Published var playerSize: CGSize = .zero { didSet {
@@ -88,7 +90,7 @@ final class PlayerModel: ObservableObject {
     }}
     @Published var aspectRatio = VideoPlayerView.defaultAspectRatio
     @Published var stream: Stream?
-    @Published var currentRate: Double = 1.0 { didSet { handleCurrentRateChange() } }
+    @Published var currentRate = 1.0 { didSet { handleCurrentRateChange() } }
 
     @Published var qualityProfileSelection: QualityProfile? { didSet { handleQualityProfileChange() } }
 
@@ -128,8 +130,18 @@ final class PlayerModel: ObservableObject {
 
     #if os(iOS)
         @Published var lockedOrientation: UIInterfaceOrientationMask?
-        @Default(.rotateToPortraitOnExitFullScreen) private var rotateToPortraitOnExitFullScreen
+        @Published var isOrientationLocked: Bool {
+            didSet {
+                Defaults[.isOrientationLocked] = isOrientationLocked
+            }
+        }
+
+        @Default(.rotateToLandscapeOnEnterFullScreen) var rotateToLandscapeOnEnterFullScreen
+        @Default(.lockPortraitWhenBrowsing) var lockPortraitWhenBrowsing
+        var fullscreenInitiatedByButton = false
     #endif
+
+    @Published var currentChapterIndex: Int?
 
     var accounts: AccountsModel { .shared }
     var comments: CommentsModel { .shared }
@@ -152,6 +164,9 @@ final class PlayerModel: ObservableObject {
     @Published var playingInPictureInPicture = false
     var pipController: AVPictureInPictureController?
     var pipDelegate = PiPDelegate()
+    #if !os(macOS)
+        var appleAVPlayerViewControllerDelegate = AppleAVPlayerViewControllerDelegate()
+    #endif
 
     var playerError: Error? { didSet {
         if let error = playerError {
@@ -163,6 +178,7 @@ final class PlayerModel: ObservableObject {
     @Default(.saveLastPlayed) var saveLastPlayed
     @Default(.lastPlayed) var lastPlayed
     @Default(.qualityProfiles) var qualityProfiles
+    @Default(.avPlayerUsesSystemControls) var avPlayerUsesSystemControls
     @Default(.forceAVPlayerForLiveStreams) var forceAVPlayerForLiveStreams
     @Default(.pauseOnHidingPlayer) private var pauseOnHidingPlayer
     @Default(.closePiPOnNavigation) var closePiPOnNavigation
@@ -171,6 +187,11 @@ final class PlayerModel: ObservableObject {
     @Default(.playerRate) var playerRate
     @Default(.systemControlsSeekDuration) var systemControlsSeekDuration
 
+    #if os(macOS)
+        @Default(.buttonBackwardSeekDuration) private var buttonBackwardSeekDuration
+        @Default(.buttonForwardSeekDuration) private var buttonForwardSeekDuration
+    #endif
+
     #if !os(macOS)
         @Default(.closePiPAndOpenPlayerOnEnteringForeground) var closePiPAndOpenPlayerOnEnteringForeground
     #endif
@@ -178,31 +199,82 @@ final class PlayerModel: ObservableObject {
     private var currentArtwork: MPMediaItemArtwork?
 
     var onPresentPlayer = [() -> Void]()
+    var onPlayStream = [(Stream) -> Void]()
+    var rateToRestore: Float?
     private var remoteCommandCenterConfigured = false
 
+    // Used in the PlayerModel extension in PlayerQueue
+    var retryAttempts = [String: Int]()
+
+    #if os(macOS)
+        var keyPressMonitor: Any?
+    #endif
+
     init() {
+        #if os(iOS)
+            isOrientationLocked = Defaults[.isOrientationLocked]
+
+            if isOrientationLocked, lockPortraitWhenBrowsing {
+                lockedOrientation = UIInterfaceOrientationMask.portrait
+                Orientation.lockOrientation(.portrait, andRotateTo: .portrait)
+            } else if isOrientationLocked {
+                lockOrientationAction()
+            }
+        #endif
         #if !os(macOS)
             mpvBackend.controller = mpvController
             mpvBackend.client = mpvController.client
+
+            // Register for audio session interruption notifications
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleAudioSessionInterruption(_:)),
+                name: AVAudioSession.interruptionNotification,
+                object: nil
+            )
+
+            // Register for audio session route change notifications
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleRouteChange(_:)),
+                name: AVAudioSession.routeChangeNotification,
+                object: AVAudioSession.sharedInstance()
+            )
         #endif
 
-        Defaults[.activeBackend] = .mpv
         playbackMode = Defaults[.playbackMode]
 
         guard pipController.isNil else { return }
-        pipController = .init(playerLayer: avPlayerBackend.playerLayer)
-        let pipDelegate = PiPDelegate()
-        pipDelegate.player = self
 
-        self.pipDelegate = pipDelegate
+        pipController = .init(playerLayer: avPlayerBackend.playerLayer)
         pipController?.delegate = pipDelegate
+        #if os(iOS)
+            if #available(iOS 14.2, *) {
+                pipController?.canStartPictureInPictureAutomaticallyFromInline = true
+            }
+        #endif
         currentRate = playerRate
     }
+
+    #if !os(macOS)
+        deinit {
+            NotificationCenter.default.removeObserver(
+                self, name: AVAudioSession.interruptionNotification, object: nil
+            )
+
+            NotificationCenter.default.removeObserver(
+                self,
+                name: AVAudioSession.routeChangeNotification,
+                object: AVAudioSession.sharedInstance()
+            )
+        }
+    #endif
 
     func show() {
         #if os(macOS)
             if presentingPlayer {
                 Windows.player.focus()
+                assignKeyPressMonitor()
                 return
             }
         #endif
@@ -218,6 +290,7 @@ final class PlayerModel: ObservableObject {
         #if os(macOS)
             Windows.player.open()
             Windows.player.focus()
+            assignKeyPressMonitor()
         #endif
     }
 
@@ -231,17 +304,13 @@ final class PlayerModel: ObservableObject {
         }
 
         DispatchQueue.main.async { [weak self] in
-            self?.exitFullScreen(showControls: false)
+            Delay.by(0.3) {
+                self?.exitFullScreen(showControls: false)
+            }
         }
 
-        #if os(iOS)
-            if Defaults[.lockPortraitWhenBrowsing] {
-                Orientation.lockOrientation(.portrait, andRotateTo: .portrait)
-            } else {
-                Orientation.lockOrientation(.allButUpsideDown)
-            }
-        #endif
         #if os(macOS)
+            destroyKeyPressMonitor()
             Windows.player.hide()
         #endif
     }
@@ -278,6 +347,14 @@ final class PlayerModel: ObservableObject {
 
     var isPlaying: Bool {
         backend.isPlaying
+    }
+
+    var isPaused: Bool {
+        backend.isPaused
+    }
+
+    var hasStarted: Bool {
+        backend.hasStarted
     }
 
     var playerItemDuration: CMTime? {
@@ -334,7 +411,7 @@ final class PlayerModel: ObservableObject {
         pause()
         videoBeingOpened = video
 
-        WatchNextViewModel.shared.hide()
+        navigation.presentingChannelSheet = false
 
         var changeBackendHandler: (() -> Void)?
 
@@ -410,6 +487,10 @@ final class PlayerModel: ObservableObject {
             upgrading: upgrading
         )
 
+        DispatchQueue.main.async {
+            self.forceBackendOnPlay = nil
+        }
+
         if !upgrading {
             updateCurrentArtwork()
         }
@@ -444,7 +525,7 @@ final class PlayerModel: ObservableObject {
             return
         }
 
-        if let backend = (live && forceAVPlayerForLiveStreams) ? PlayerBackendType.appleAVPlayer : qualityProfile?.backend,
+        if let backend = forceBackendOnPlay ?? ((live && forceAVPlayerForLiveStreams) ? PlayerBackendType.appleAVPlayer : qualityProfile?.backend),
            backend != activeBackend,
            backend == .appleAVPlayer || !(avPlayerBackend.startPictureInPictureOnPlay || playingInPictureInPicture)
         {
@@ -459,18 +540,32 @@ final class PlayerModel: ObservableObject {
             return
         }
 
-        streamSelection = stream
-        playStream(
-            stream,
-            of: currentVideo,
-            preservingTime: !currentItem.playbackTime.isNil
-        )
+        DispatchQueue.global(qos: .userInitiated).async {
+            DispatchQueue.main.async {
+                self.streamSelection = stream
+            }
+            self.playStream(
+                stream,
+                of: currentVideo,
+                preservingTime: !self.currentItem.playbackTime.isNil
+            )
+        }
     }
 
     private func handlePresentationChange() {
-        backend.setNeedsDrawing(presentingPlayer)
+        #if os(macOS)
+            // TODO: Check whether this is needed on macOS
+            backend.setNeedsDrawing(presentingPlayer)
+        #endif
+
+        #if os(iOS)
+            if presentingPlayer, activeBackend == .appleAVPlayer, avPlayerUsesSystemControls, Constants.isIPhone {
+                Orientation.lockOrientation(.portrait, andRotateTo: .portrait)
+            }
+        #endif
 
         controls.hide()
+        controls.hideOverlays()
 
         #if !os(macOS)
             UIApplication.shared.isIdleTimerDisabled = presentingPlayer
@@ -487,9 +582,19 @@ final class PlayerModel: ObservableObject {
                 self?.pause()
             }
         }
+
+        if !presentingPlayer {
+            #if os(iOS)
+                if lockPortraitWhenBrowsing {
+                    Orientation.lockOrientation(.portrait, andRotateTo: .portrait)
+                } else {
+                    Orientation.lockOrientation(.all)
+                }
+            #endif
+        }
     }
 
-    func changeActiveBackend(from: PlayerBackendType, to: PlayerBackendType, changingStream: Bool = true) {
+    func changeActiveBackend(from: PlayerBackendType, to: PlayerBackendType, changingStream: Bool = true, isInClosePip: Bool = false) {
         guard activeBackend != to else {
             return
         }
@@ -498,7 +603,7 @@ final class PlayerModel: ObservableObject {
 
         let wasPlaying = isPlaying
 
-        if to == .mpv {
+        if to == .mpv && !isInClosePip {
             closePiP()
         }
 
@@ -514,6 +619,9 @@ final class PlayerModel: ObservableObject {
         if !self.backend.canPlayAtRate(currentRate) {
             currentRate = self.backend.suggestedPlaybackRates.last { $0 < currentRate } ?? 1.0
         }
+
+        self.rateToRestore = Float(currentRate)
+
         self.backend.didChangeTo()
 
         if wasPlaying {
@@ -537,10 +645,15 @@ final class PlayerModel: ObservableObject {
             self.stream = stream
             streamSelection = stream
 
+            self.upgradeToStream(stream, force: true)
+
             return
         }
 
-        if !backend.canPlay(stream) || (to == .mpv && !stream.hlsURL.isNil) {
+        if !backend.canPlay(stream) ||
+            (to == .mpv && stream.isHLS) ||
+            (to == .appleAVPlayer && !stream.isHLS)
+        {
             guard let preferredStream = streamByQualityProfile else {
                 return
             }
@@ -583,57 +696,65 @@ final class PlayerModel: ObservableObject {
     }
 
     func closeCurrentItem(finished: Bool = false) {
-        pause()
-        videoBeingOpened = nil
-
+        guard !closing else { return }
         closing = true
-        controls.presentingControls = false
 
-        self.hide()
+        if playingFullScreen { exitFullScreen() }
 
-        Delay.by(0.8) { [weak self] in
+        Delay.by(0.3) { [weak self] in
             guard let self else { return }
-            self.closePiP()
+            pause()
+            videoBeingOpened = nil
+            advancing = false
+            forceBackendOnPlay = nil
+
+            controls.presentingControls = false
 
             self.prepareCurrentItemForHistory(finished: finished)
-            withAnimation {
-                self.currentItem = nil
-            }
-            self.updateNowPlayingInfo()
+            self.hide()
 
-            self.backend.closeItem()
-            self.aspectRatio = VideoPlayerView.defaultAspectRatio
-            self.resetAutoplay()
-            self.closing = false
-            self.playingFullScreen = false
+            Delay.by(0.7) { [weak self] in
+                guard let self else { return }
+                if playingInPictureInPicture { self.closePiP() }
+
+                withAnimation {
+                    self.currentItem = nil
+                }
+
+                self.updateNowPlayingInfo()
+                self.backend.closeItem()
+                self.aspectRatio = VideoPlayerView.defaultAspectRatio
+                self.resetAutoplay()
+                self.closing = false
+            }
         }
     }
 
     func startPiP() {
+        previousActiveBackend = activeBackend
         avPlayerBackend.startPictureInPictureOnPlay = false
         avPlayerBackend.startPictureInPictureOnSwitch = false
 
-        if activeBackend == .appleAVPlayer {
+        guard activeBackend != .appleAVPlayer else {
             avPlayerBackend.tryStartingPictureInPicture()
             return
         }
 
-        guard let video = currentVideo else { return }
-        guard let stream = avPlayerBackend.bestPlayable(availableStreams, maxResolution: .hd720p30) else { return }
+        avPlayerBackend.startPictureInPictureOnSwitch = true
 
-        exitFullScreen()
-
-        if avPlayerBackend.video == video {
-            if activeBackend != .appleAVPlayer {
-                avPlayerBackend.startPictureInPictureOnSwitch = true
-                changeActiveBackend(from: activeBackend, to: .appleAVPlayer)
+        saveTime {
+            self.changeActiveBackend(from: .mpv, to: .appleAVPlayer)
+            _ = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] timer in
+                if let pipController = self?.pipController, pipController.isPictureInPictureActive, self?.avPlayerBackend.isPlaying == true {
+                    self?.exitFullScreen()
+                    self?.controls.objectWillChange.send()
+                    timer.invalidate()
+                } else if self?.activeBackend == .appleAVPlayer, self?.avPlayerBackend.startPictureInPictureOnSwitch == false {
+                    self?.avPlayerBackend.startPictureInPictureOnSwitch = true
+                    self?.avPlayerBackend.tryStartingPictureInPicture()
+                }
             }
-        } else {
-            avPlayerBackend.startPictureInPictureOnPlay = true
-            playStream(stream, of: video, preservingTime: true, upgrading: true, withBackend: avPlayerBackend)
         }
-
-        controls.objectWillChange.send()
     }
 
     var transitioningToPiP: Bool {
@@ -661,7 +782,73 @@ final class PlayerModel: ObservableObject {
             show()
         #endif
 
-        backend.closePiP()
+        avPlayerBackend.closePiP()
+        _ = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] timer in
+            if self?.activeBackend == .appleAVPlayer, self?.avPlayerBackend.isPlaying == true, self?.playingInPictureInPicture == false {
+                timer.invalidate()
+            }
+        }
+
+        guard previousActiveBackend == .mpv else { return }
+
+        saveTime {
+            self.changeActiveBackend(from: .appleAVPlayer, to: .mpv, isInClosePip: true)
+            _ = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] timer in
+                if self?.activeBackend == .mpv, self?.mpvBackend.isPlaying == true {
+                    timer.invalidate()
+                }
+            }
+        }
+
+        // We need to remove the itme from the player, if not it will be displayed when next video goe to PiP.
+        Delay.by(1.0) {
+            self.avPlayerBackend.closeItem()
+        }
+    }
+
+    var pipImage: String {
+        transitioningToPiP ? "pip.fill" : pipController?.isPictureInPictureActive ?? false ? "pip.exit" : "pip.enter"
+    }
+
+    var fullscreenImage: String {
+        playingFullScreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right"
+    }
+
+    func toggleFullScreenAction() {
+        toggleFullscreen(playingFullScreen, showControls: false, initiatedByButton: true)
+    }
+
+    func togglePiPAction() {
+        if pipController?.isPictureInPictureActive ?? false {
+            closePiP()
+        } else {
+            startPiP()
+        }
+    }
+
+    #if os(iOS)
+        var lockOrientationImage: String {
+            isOrientationLocked ? "lock.rotation" : "lock.rotation.open"
+        }
+
+        func lockOrientationAction() {
+            // This makes toggling orientation lock more robust
+            if lockedOrientation.isNil || !isOrientationLocked {
+                isOrientationLocked = true
+                let orientationMask = OrientationTracker.shared.currentInterfaceOrientationMask
+                lockedOrientation = orientationMask
+                let orientation = OrientationTracker.shared.currentInterfaceOrientation
+                Orientation.lockOrientation(orientationMask, andRotateTo: playingFullScreen ? nil : orientation)
+            } else {
+                isOrientationLocked = false
+                lockedOrientation = nil
+                Orientation.lockOrientation(.all)
+            }
+        }
+    #endif
+
+    func replayAction() {
+        backend.seek(to: 0.0, seekType: .userInteracted)
     }
 
     func handleQueueChange() {
@@ -673,9 +860,11 @@ final class PlayerModel: ObservableObject {
 
     func handleCurrentItemChange() {
         if currentItem == nil {
-            captions = nil
             FeedModel.shared.calculateUnwatchedFeed()
         }
+
+        // Captions need to be set to nil on item change, to clear the previus values.
+        captions = nil
 
         #if os(macOS)
             Windows.player.window?.title = windowTitle
@@ -732,37 +921,40 @@ final class PlayerModel: ObservableObject {
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
                 guard let self else { return }
-                self.playerAPI(item.video)?.loadDetails(item, completionHandler: { newItem in
+                self.playerAPI(item.video)?.loadDetails(item, failureHandler: nil) { newItem in
                     guard newItem.videoID == self.autoplayItem?.videoID else { return }
                     self.autoplayItem = newItem
                     self.updateRemoteCommandCenter()
                     self.controls.objectWillChange.send()
-                })
+                }
             }
         }
     }
 
     func updateRemoteCommandCenter() {
-        let skipForwardCommand = MPRemoteCommandCenter.shared().skipForwardCommand
-        let skipBackwardCommand = MPRemoteCommandCenter.shared().skipBackwardCommand
-        let previousTrackCommand = MPRemoteCommandCenter.shared().previousTrackCommand
-        let nextTrackCommand = MPRemoteCommandCenter.shared().nextTrackCommand
+        let commandCenter = MPRemoteCommandCenter.shared()
+        let skipForwardCommand = commandCenter.skipForwardCommand
+        let skipBackwardCommand = commandCenter.skipBackwardCommand
+        let previousTrackCommand = commandCenter.previousTrackCommand
+        let nextTrackCommand = commandCenter.nextTrackCommand
 
         if !remoteCommandCenterConfigured {
             remoteCommandCenterConfigured = true
 
-            #if !os(macOS)
-                try? AVAudioSession.sharedInstance().setCategory(
-                    .playback,
-                    mode: .moviePlayback
-                )
-
-                UIApplication.shared.beginReceivingRemoteControlEvents()
-            #endif
-
             let interval = TimeInterval(systemControlsSeekDuration) ?? 10
             let preferredIntervals = [NSNumber(value: interval)]
 
+            // Remove existing targets to avoid duplicates
+            skipForwardCommand.removeTarget(nil)
+            skipBackwardCommand.removeTarget(nil)
+            previousTrackCommand.removeTarget(nil)
+            nextTrackCommand.removeTarget(nil)
+            commandCenter.playCommand.removeTarget(nil)
+            commandCenter.pauseCommand.removeTarget(nil)
+            commandCenter.togglePlayPauseCommand.removeTarget(nil)
+            commandCenter.changePlaybackPositionCommand.removeTarget(nil)
+
+            // Re-add targets for handling commands
             skipForwardCommand.preferredIntervals = preferredIntervals
             skipBackwardCommand.preferredIntervals = preferredIntervals
 
@@ -786,22 +978,22 @@ final class PlayerModel: ObservableObject {
                 return .success
             }
 
-            MPRemoteCommandCenter.shared().playCommand.addTarget { [weak self] _ in
+            commandCenter.playCommand.addTarget { [weak self] _ in
                 self?.play()
                 return .success
             }
 
-            MPRemoteCommandCenter.shared().pauseCommand.addTarget { [weak self] _ in
+            commandCenter.pauseCommand.addTarget { [weak self] _ in
                 self?.pause()
                 return .success
             }
 
-            MPRemoteCommandCenter.shared().togglePlayPauseCommand.addTarget { [weak self] _ in
+            commandCenter.togglePlayPauseCommand.addTarget { [weak self] _ in
                 self?.togglePlay()
                 return .success
             }
 
-            MPRemoteCommandCenter.shared().changePlaybackPositionCommand.addTarget { [weak self] remoteEvent in
+            commandCenter.changePlaybackPositionCommand.addTarget { [weak self] remoteEvent in
                 guard let event = remoteEvent as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
 
                 self?.backend.seek(to: event.positionTime, seekType: .userInteracted)
@@ -836,22 +1028,43 @@ final class PlayerModel: ObservableObject {
         }
     #else
         func handleEnterForeground() {
-            setNeedsDrawing(presentingPlayer)
-            avPlayerBackend.playerLayer.player = avPlayerBackend.avPlayer
+            DispatchQueue.global(qos: .userInteractive).async { [weak self] in
+                guard let self = self else { return }
+
+                if !self.musicMode, self.activeBackend == .mpv {
+                    self.mpvBackend.addVideoTrackFromStream()
+                    self.mpvBackend.setVideoToAuto()
+                    self.mpvBackend.controls.resetTimer()
+                } else if !self.musicMode, self.activeBackend == .appleAVPlayer {
+                    self.avPlayerBackend.bindPlayerToLayer()
+                }
+            }
+            #if os(iOS)
+                OrientationTracker.shared.startDeviceOrientationTracking()
+            #endif
 
             guard closePiPAndOpenPlayerOnEnteringForeground, playingInPictureInPicture else {
                 return
             }
 
             show()
-            closePiP()
+            // Needs to be delayed a bit, otherwise the PiP windows stays open
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.closePiP()
+            }
         }
 
         func handleEnterBackground() {
+            #if os(iOS)
+                OrientationTracker.shared.stopDeviceOrientationTracking()
+            #endif
+
             if Defaults[.pauseOnEnteringBackground], !playingInPictureInPicture, !musicMode {
                 pause()
-            } else if !playingInPictureInPicture {
-                avPlayerBackend.playerLayer.player = nil
+            } else if !playingInPictureInPicture, activeBackend == .appleAVPlayer {
+                avPlayerBackend.removePlayerFromLayer()
+            } else if activeBackend == .mpv, !musicMode {
+                mpvBackend.setVideoToNo()
             }
         }
     #endif
@@ -861,6 +1074,7 @@ final class PlayerModel: ObservableObject {
 
         logger.info("entering fullscreen")
         toggleFullscreen(false, showControls: showControls)
+        self.playingFullScreen = true
     }
 
     func exitFullScreen(showControls: Bool = true) {
@@ -868,18 +1082,30 @@ final class PlayerModel: ObservableObject {
 
         logger.info("exiting fullscreen")
         toggleFullscreen(true, showControls: showControls)
+        self.playingFullScreen = false
     }
 
     func updateNowPlayingInfo() {
         #if os(tvOS)
             guard activeBackend == .mpv else { return }
         #endif
+
         guard let video = currentItem?.video else {
             MPNowPlayingInfoCenter.default().nowPlayingInfo = .none
             return
         }
 
         let currentTime = (backend.currentTime?.seconds.isFinite ?? false) ? backend.currentTime!.seconds : 0
+
+        // Determine the media type based on musicMode
+        let mediaType: NSNumber
+        if musicMode {
+            mediaType = MPMediaType.anyAudio.rawValue as NSNumber
+        } else {
+            mediaType = MPMediaType.anyVideo.rawValue as NSNumber
+        }
+
+        // Prepare the Now Playing info dictionary
         var nowPlayingInfo: [String: AnyObject] = [
             MPMediaItemPropertyTitle: video.displayTitle as AnyObject,
             MPMediaItemPropertyArtist: video.displayAuthor as AnyObject,
@@ -887,7 +1113,7 @@ final class PlayerModel: ObservableObject {
             MPNowPlayingInfoPropertyElapsedPlaybackTime: currentTime as AnyObject,
             MPNowPlayingInfoPropertyPlaybackQueueCount: queue.count as AnyObject,
             MPNowPlayingInfoPropertyPlaybackQueueIndex: 1 as AnyObject,
-            MPMediaItemPropertyMediaType: MPMediaType.anyVideo.rawValue as AnyObject
+            MPMediaItemPropertyMediaType: mediaType
         ]
 
         if !currentArtwork.isNil {
@@ -908,7 +1134,7 @@ final class PlayerModel: ObservableObject {
 
     func updateCurrentArtwork() {
         guard let video = currentVideo,
-              let thumbnailURL = video.thumbnailURL(quality: .medium)
+              let thumbnailURL = video.thumbnailURL(quality: Constants.isIPhone ? .medium : .maxres)
         else {
             return
         }
@@ -930,31 +1156,52 @@ final class PlayerModel: ObservableObject {
         task.resume()
     }
 
-    func toggleFullscreen(_ isFullScreen: Bool, showControls: Bool = true) {
+    func toggleFullscreen(_ isFullScreen: Bool, showControls: Bool = true, initiatedByButton: Bool = false) {
         controls.presentingControls = showControls && isFullScreen
 
         #if os(macOS)
             Windows.player.toggleFullScreen()
         #endif
 
+        playingFullScreen = !isFullScreen
+
         #if os(iOS)
-            if !playingFullScreen {
-                playingFullScreen = true
-                Orientation.lockOrientation(.allButUpsideDown)
-            } else {
-                let rotationOrientation = rotateToPortraitOnExitFullScreen ? UIInterfaceOrientation.portrait : nil
-                Orientation.lockOrientation(.allButUpsideDown, andRotateTo: rotationOrientation)
-                // TODO: rework to move view before rotating
-                if SafeArea.insets.left > 0 {
-                    Delay.by(0.15) {
-                        self.playingFullScreen = false
-                    }
-                } else {
-                    self.playingFullScreen = false
+            if playingFullScreen {
+                if activeBackend == .appleAVPlayer, avPlayerUsesSystemControls {
+                    fullscreenInitiatedByButton = initiatedByButton
+                    avPlayerBackend.controller.enterFullScreen(animated: true)
+                    return
                 }
+                let lockOrientation = rotateToLandscapeOnEnterFullScreen.interfaceOrientation
+                if currentVideoIsLandscape {
+                    if initiatedByButton {
+                        Orientation.lockOrientation(isOrientationLocked
+                            ? (lockOrientation == .landscapeRight ? .landscapeRight : .landscapeLeft)
+                            : .landscape)
+                    }
+                    let orientation = OrientationTracker.shared.currentDeviceOrientation.isLandscape
+                        ? OrientationTracker.shared.currentInterfaceOrientation
+                        : rotateToLandscapeOnEnterFullScreen.interfaceOrientation
+
+                    Orientation.lockOrientation(
+                        isOrientationLocked
+                            ? (lockOrientation == .landscapeRight ? .landscapeRight : .landscapeLeft)
+                            : .all,
+                        andRotateTo: orientation
+                    )
+                }
+            } else {
+                if activeBackend == .appleAVPlayer, avPlayerUsesSystemControls {
+                    avPlayerBackend.controller.exitFullScreen(animated: true)
+                    avPlayerBackend.controller.dismiss(animated: true)
+                    return
+                }
+                if lockPortraitWhenBrowsing {
+                    lockedOrientation = UIInterfaceOrientationMask.portrait
+                }
+                let rotationOrientation = lockPortraitWhenBrowsing ? UIInterfaceOrientation.portrait : nil
+                Orientation.lockOrientation(lockPortraitWhenBrowsing ? .portrait : .all, andRotateTo: rotationOrientation)
             }
-        #else
-            playingFullScreen = !isFullScreen
         #endif
     }
 
@@ -987,13 +1234,237 @@ final class PlayerModel: ObservableObject {
 
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                self.aspectRatio = self.backend.aspectRatio
+                withAnimation {
+                    self.aspectRatio = self.backend.aspectRatio
+                }
             }
         #endif
+    }
+
+    var currentVideoIsLandscape: Bool {
+        guard currentVideo != nil else { return false }
+
+        return aspectRatio > 1
     }
 
     var formattedSize: String {
         guard let videoWidth = backend?.videoWidth, let videoHeight = backend?.videoHeight else { return "unknown" }
         return "\(String(format: "%.2f", videoWidth))\u{d7}\(String(format: "%.2f", videoHeight))"
     }
+
+    func handleOnPlayStream(_ stream: Stream) {
+        backend.setRate(currentRate)
+
+        onPlayStream.forEach { $0(stream) }
+        onPlayStream.removeAll()
+    }
+
+    func updateTime(_ cmTime: CMTime) {
+        let time = CMTimeGetSeconds(cmTime)
+        let newChapterIndex = chapterForTime(time)
+        if currentChapterIndex != newChapterIndex {
+            DispatchQueue.main.async {
+                self.currentChapterIndex = newChapterIndex
+            }
+        }
+    }
+
+    private func chapterForTime(_ time: Double) -> Int? {
+        guard let chapters = self.videoForDisplay?.chapters else {
+            return nil
+        }
+
+        for (index, chapter) in chapters.enumerated() {
+            let nextChapterStartTime = index < (chapters.count - 1) ? chapters[index + 1].start : nil
+
+            if let nextChapterStart = nextChapterStartTime {
+                if time >= chapter.start, time < nextChapterStart {
+                    return index
+                }
+            } else {
+                if time >= chapter.start {
+                    return index
+                }
+            }
+        }
+
+        return nil
+    }
+
+    #if !os(macOS)
+        func setAudioSessionActive(_ setActive: Bool) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                do {
+                    try AVAudioSession.sharedInstance().setActive(setActive)
+                } catch {
+                    self.logger.error("Error setting up audio session: \(error)")
+                }
+            }
+        }
+
+        @objc func handleAudioSessionInterruption(_ notification: Notification) {
+            logger.info("Audio session interruption received.")
+            logger.info("Notification object: \(String(describing: notification.object))")
+
+            guard let info = notification.userInfo else {
+                logger.info("userInfo is missing in the notification.")
+                return
+            }
+
+            // Extract the interruption type
+            guard let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+                  let type = AVAudioSession.InterruptionType(rawValue: typeValue)
+            else {
+                logger.info("AVAudioSessionInterruptionTypeKey is missing or not a UInt in userInfo.")
+                return
+            }
+
+            logger.info("Interruption type received: \(type)")
+
+            // Check availability for iOS 14.5 or newer to handle interruption reason
+            // Currently only for debugging purpose
+            #if os(iOS)
+                if #available(iOS 14.5, *) {
+                    // Extract the interruption reason, if available
+                    if let reasonValue = info[AVAudioSessionInterruptionReasonKey] as? UInt,
+                       let reason = AVAudioSession.InterruptionReason(rawValue: reasonValue)
+                    {
+                        logger.info("Interruption reason received: \(reason)")
+                        switch reason {
+                        case .default:
+                            logger.info("Interruption reason: Default or unspecified interruption occurred.")
+                        case .appWasSuspended:
+                            logger.info("Interruption reason: The app was suspended during the interruption.")
+                        @unknown default:
+                            logger.info("Unknown interruption reason received.")
+                        }
+                    } else {
+                        logger.info("AVAudioSessionInterruptionReasonKey is missing or not a UInt in userInfo.")
+                    }
+                } else {
+                    logger.info("Interruption reason handling is not available on this iOS version.")
+                }
+            #endif
+
+            // Handle the specific interruption type
+            switch type {
+            case .began:
+                pause()
+                logger.info("Audio session interrupted (began).")
+            case .ended:
+                // Extract any interruption options, if available
+                if let optionsValue = info[AVAudioSessionInterruptionOptionKey] as? UInt {
+                    logger.info("Interruption options received: \(optionsValue)")
+                    if optionsValue & AVAudioSession.InterruptionOptions.shouldResume.rawValue != 0 {
+                        play()
+                        logger.info("Interruption option indicates playback should resume automatically.")
+                    } else {
+                        logger.info("Interruption option indicates playback should not resume automatically.")
+                    }
+                } else {
+                    logger.info("AVAudioSessionInterruptionOptionKey is missing or not a UInt in userInfo.")
+                }
+                logger.info("Audio session interruption ended.")
+                // Check if audio was resumed or if there's any indication of ducking
+                let currentVolume = AVAudioSession.sharedInstance().outputVolume
+                logger.info("Current output volume: \(currentVolume)")
+            default:
+                logger.info("Unknown interruption type received.")
+            }
+        }
+
+        @objc func handleRouteChange(_ notification: Notification) {
+            logger.info("Audio route change received.")
+
+            guard let info = notification.userInfo else {
+                logger.info("userInfo is missing in the notification.")
+                return
+            }
+
+            guard let reasonValue = info[AVAudioSessionRouteChangeReasonKey] as? UInt,
+                  let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue)
+            else {
+                logger.info("AVAudioSessionRouteChangeReasonKey is missing or not a UInt in userInfo.")
+                return
+            }
+
+            logger.info("Route change reason received: \(reason)")
+
+            let currentCategory = AVAudioSession.sharedInstance().category
+            logger.info("Current audio session category before change: \(currentCategory)")
+
+            switch reason {
+            case .categoryChange:
+                logger.info("Audio session category changed.")
+                let newCategory = AVAudioSession.sharedInstance().category
+                logger.info("New audio session category: \(newCategory)")
+            case .oldDeviceUnavailable, .newDeviceAvailable:
+                logger.info("Audio route change may indicate ducking or device change.")
+                let currentRoute = AVAudioSession.sharedInstance().currentRoute
+                logger.info("Current audio route: \(currentRoute)")
+
+                for output in currentRoute.outputs {
+                    logger.info("Output port type: \(output.portType), UID: \(output.uid)")
+                    switch output.portType {
+                    case .headphones, .bluetoothA2DP:
+                        logger.info("Detected port type \(output.portType). Executing play().")
+                        play()
+                    default:
+                        logger.info("Detected port type \(output.portType). Executing pause().")
+                        pause()
+                    }
+                }
+            case .noSuitableRouteForCategory:
+                logger.info("No suitable route for the current category.")
+            default:
+                logger.info("Unhandled route change reason: \(reason)")
+            }
+        }
+    #endif
+
+    #if os(macOS)
+        private func assignKeyPressMonitor() {
+            keyPressMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] keyEvent -> NSEvent? in
+                // Check if the player window is the key window
+                guard let self, let window = Windows.playerWindow, window.isKeyWindow else { return keyEvent }
+
+                switch keyEvent.keyCode {
+                case 124:
+                    if !self.liveStreamInAVPlayer {
+                        let interval = TimeInterval(self.buttonForwardSeekDuration) ?? 10
+                        self.backend.seek(
+                            relative: .secondsInDefaultTimescale(interval),
+                            seekType: .userInteracted
+                        )
+                    }
+                case 123:
+                    if !self.liveStreamInAVPlayer {
+                        let interval = TimeInterval(self.buttonBackwardSeekDuration) ?? 10
+                        self.backend.seek(
+                            relative: .secondsInDefaultTimescale(-interval),
+                            seekType: .userInteracted
+                        )
+                    }
+                case 3:
+                    self.toggleFullscreen(
+                        self.playingFullScreen,
+                        showControls: false
+                    )
+                case 49:
+                    if !self.controls.isLoadingVideo {
+                        self.backend.togglePlay()
+                    }
+                default:
+                    return keyEvent
+                }
+                return nil
+            }
+        }
+
+        private func destroyKeyPressMonitor() {
+            if let keyPressMonitor {
+                NSEvent.removeMonitor(keyPressMonitor)
+            }
+        }
+    #endif
 }

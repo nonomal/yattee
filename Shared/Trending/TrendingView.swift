@@ -38,19 +38,8 @@ struct TrendingView: View {
 
     var body: some View {
         Section {
-            VStack(spacing: 0) {
-                #if os(tvOS)
-                    toolbar
-                    HorizontalCells(items: trending)
-                        .padding(.top, 40)
-
-                    Spacer()
-                #else
-                    VerticalCells(items: trending)
-                        .environment(\.scrollViewBottomPadding, 70)
-                #endif
-            }
-            .environment(\.listingStyle, trendingListingStyle)
+            VerticalCells(items: trending) { if shouldDisplayHeader { header } }
+                .environment(\.listingStyle, trendingListingStyle)
         }
 
         .toolbar {
@@ -64,9 +53,7 @@ struct TrendingView: View {
                             .id(favoriteItem.id)
                     }
 
-                    if accounts.app.supportsTrendingCategories {
-                        categoryButton
-                    }
+                    categoryButton
                     countryButton
                 }
             #endif
@@ -90,7 +77,7 @@ struct TrendingView: View {
             TrendingCountry(selectedCountry: $country)
         }
         #else
-                .sheet(isPresented: $presentingCountrySelection) {
+        .sheet(isPresented: $presentingCountrySelection) {
                     TrendingCountry(selectedCountry: $country)
                     #if os(macOS)
                         .frame(minWidth: 400, minHeight: 400)
@@ -133,9 +120,17 @@ struct TrendingView: View {
             ToolbarItem {
                 ListingStyleButtons(listingStyle: $trendingListingStyle)
             }
+
+            ToolbarItem {
+                HideWatchedButtons()
+            }
+
+            ToolbarItem {
+                HideShortsButtons()
+            }
         }
         #else
-                .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
                     resource.loadIfNeeded()?
                         .onFailure { self.error = $0 }
                         .onSuccess { _ in self.error = nil }
@@ -176,11 +171,14 @@ struct TrendingView: View {
             Menu {
                 countryButton
 
-                if accounts.app.supportsTrendingCategories {
-                    categoryButton
-                }
+                categoryButton
 
                 ListingStyleButtons(listingStyle: $trendingListingStyle)
+
+                Section {
+                    HideWatchedButtons()
+                    HideShortsButtons()
+                }
 
                 Section {
                     SettingsButtons()
@@ -200,26 +198,28 @@ struct TrendingView: View {
         }
     #endif
 
-    private var categoryButton: some View {
-        #if os(tvOS)
-            Button(category.name) {
-                self.category = category.next()
-            }
-            .contextMenu {
-                ForEach(TrendingCategory.allCases) { category in
-                    Button(category.controlLabel) { self.category = category }
+    @ViewBuilder private var categoryButton: some View {
+        if accounts.app.supportsTrendingCategories {
+            #if os(tvOS)
+                Button(category.name) {
+                    self.category = category.next()
+                }
+                .contextMenu {
+                    ForEach(TrendingCategory.allCases) { category in
+                        Button(category.controlLabel) { self.category = category }
+                    }
+
+                    Button("Cancel", role: .cancel) {}
                 }
 
-                Button("Cancel", role: .cancel) {}
-            }
-
-        #else
-            Picker(category.controlLabel, selection: $category) {
-                ForEach(TrendingCategory.allCases) { category in
-                    Label(category.controlLabel, systemImage: category.systemImage).tag(category)
+            #else
+                Picker(category.controlLabel, selection: $category) {
+                    ForEach(TrendingCategory.allCases) { category in
+                        Label(category.controlLabel, systemImage: category.systemImage).tag(category)
+                    }
                 }
-            }
-        #endif
+            #endif
+        }
     }
 
     private var countryButton: some View {
@@ -238,6 +238,43 @@ struct TrendingView: View {
 
     private func updateFavoriteItem() {
         favoriteItem = FavoriteItem(section: .trending(country.rawValue, category.rawValue))
+    }
+
+    var header: some View {
+        HStack {
+            Group {
+                categoryButton
+                countryButton
+            }
+            .font(.caption)
+
+            Spacer()
+            ListingStyleButtons(listingStyle: $trendingListingStyle)
+            HideWatchedButtons()
+            HideShortsButtons()
+
+            Button {
+                resource.load()
+                    .onFailure { self.error = $0 }
+                    .onSuccess { _ in self.error = nil }
+            } label: {
+                Label("Refresh", systemImage: "arrow.clockwise")
+                    .labelStyle(.iconOnly)
+                    .imageScale(.small)
+                    .font(.caption)
+            }
+        }
+        .padding(.leading, 30)
+        .padding(.bottom, 15)
+        .padding(.trailing, 30)
+    }
+
+    var shouldDisplayHeader: Bool {
+        #if os(tvOS)
+            true
+        #else
+            false
+        #endif
     }
 }
 

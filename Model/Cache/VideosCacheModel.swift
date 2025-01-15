@@ -4,7 +4,7 @@ import Logging
 import SwiftyJSON
 
 struct VideosCacheModel: CacheModel {
-    static let shared = VideosCacheModel()
+    static let shared = Self()
     let logger = Logger(label: "stream.yattee.cache.videos")
 
     static let diskConfig = DiskConfig(name: "videos")
@@ -13,6 +13,7 @@ struct VideosCacheModel: CacheModel {
     let storage = try? Storage<String, JSON>(
         diskConfig: Self.diskConfig,
         memoryConfig: Self.memoryConfig,
+        fileManager: FileManager.default,
         transformer: BaseCacheModel.jsonTransformer
     )
 

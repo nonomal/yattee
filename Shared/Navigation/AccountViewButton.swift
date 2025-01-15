@@ -5,10 +5,8 @@ struct AccountViewButton: View {
     @ObservedObject private var model = AccountsModel.shared
     private var navigation = NavigationModel.shared
 
-    @Default(.accounts) private var accounts
     @Default(.instances) private var instances
     @Default(.accountPickerDisplaysUsername) private var accountPickerDisplaysUsername
-    @Default(.accountPickerDisplaysAnonymousAccounts) private var accountPickerDisplaysAnonymousAccounts
 
     @ViewBuilder var body: some View {
         if !instances.isEmpty {
@@ -32,7 +30,6 @@ struct AccountViewButton: View {
 
                     if accountPickerDisplaysUsername {
                         label
-                            .labelStyle(.titleOnly)
                     }
                 }
             }
@@ -49,6 +46,6 @@ struct AccountViewButton: View {
     }
 
     private var label: some View {
-        Label(model.current?.description ?? "Select Account", systemImage: "globe")
+        Text(model.current?.description ?? "Select Account")
     }
 }

@@ -5,6 +5,8 @@ import SwiftUI
 import SwiftyJSON
 
 struct Video: Identifiable, Equatable, Hashable {
+    static let shortLength = 61.0
+
     enum VideoID {
         static func isValid(_ id: Video.ID) -> Bool {
             isYouTube(id) || isPeerTube(id)
@@ -40,6 +42,7 @@ struct Video: Identifiable, Equatable, Hashable {
 
     var live: Bool
     var upcoming: Bool
+    var short: Bool
 
     var streams = [Stream]()
 
@@ -50,7 +53,7 @@ struct Video: Identifiable, Equatable, Hashable {
 
     var channel: Channel
 
-    var related = [Video]()
+    var related = [Self]()
     var chapters = [Chapter]()
 
     var captions = [Captions]()
@@ -74,12 +77,13 @@ struct Video: Identifiable, Equatable, Hashable {
         indexID: String? = nil,
         live: Bool = false,
         upcoming: Bool = false,
+        short: Bool = false,
         publishedAt: Date? = nil,
         likes: Int? = nil,
         dislikes: Int? = nil,
         keywords: [String] = [],
         streams: [Stream] = [],
-        related: [Video] = [],
+        related: [Self] = [],
         chapters: [Chapter] = [],
         captions: [Captions] = []
     ) {
@@ -101,6 +105,7 @@ struct Video: Identifiable, Equatable, Hashable {
         self.indexID = indexID
         self.live = live
         self.upcoming = upcoming
+        self.short = short
         self.publishedAt = publishedAt
         self.likes = likes
         self.dislikes = dislikes
@@ -111,8 +116,8 @@ struct Video: Identifiable, Equatable, Hashable {
         self.captions = captions
     }
 
-    static func local(_ url: URL) -> Video {
-        Video(
+    static func local(_ url: URL) -> Self {
+        Self(
             app: .local,
             videoID: url.absoluteString,
             streams: [.init(localURL: url)]
@@ -154,6 +159,7 @@ struct Video: Identifiable, Equatable, Hashable {
             "indexID": indexID ?? "",
             "live": live,
             "upcoming": upcoming,
+            "short": short,
             "publishedAt": publishedAt
         ]
     }
@@ -161,7 +167,7 @@ struct Video: Identifiable, Equatable, Hashable {
     static func from(_ json: JSON) -> Self {
         let dateFormatter = ISO8601DateFormatter()
 
-        return Video(
+        return Self(
             instanceID: json["instanceID"].stringValue,
             app: .init(rawValue: json["app"].stringValue) ?? AccountsModel.shared.current.app ?? .local,
             instanceURL: URL(string: json["instanceURL"].stringValue) ?? AccountsModel.shared.current.instance.apiURL,
@@ -180,6 +186,7 @@ struct Video: Identifiable, Equatable, Hashable {
             indexID: json["indexID"].stringValue,
             live: json["live"].boolValue,
             upcoming: json["upcoming"].boolValue,
+            short: json["short"].boolValue,
             publishedAt: dateFormatter.date(from: json["publishedAt"].stringValue)
         )
     }
@@ -242,7 +249,7 @@ struct Video: Identifiable, Equatable, Hashable {
         thumbnails.first { $0.quality == quality }?.url
     }
 
-    static func == (lhs: Video, rhs: Video) -> Bool {
+    static func == (lhs: Self, rhs: Self) -> Bool {
         let videoIDIsEqual = lhs.videoID == rhs.videoID
 
         if !lhs.indexID.isNil, !rhs.indexID.isNil {
@@ -283,13 +290,13 @@ struct Video: Identifiable, Equatable, Hashable {
     }
 
     var localStreamIsFile: Bool {
-        guard let localStream else { return false }
-        return localStream.localURL.isFileURL
+        guard let url = localStream?.localURL else { return false }
+        return url.isFileURL
     }
 
     var localStreamIsRemoteURL: Bool {
-        guard let localStream else { return false }
-        return !localStream.localURL.isFileURL
+        guard let url = localStream?.localURL else { return false }
+        return url.isFileURL
     }
 
     var localStreamIsDirectory: Bool {

@@ -20,10 +20,11 @@ struct VideoContextMenuView: View {
 
     @FetchRequest private var watchRequest: FetchedResults<Watch>
 
-    @Default(.saveHistory) private var saveHistory
+    @Default(.showPlayNowInBackendContextMenu) private var showPlayNowInBackendContextMenu
 
     private var backgroundContext = PersistenceController.shared.container.newBackgroundContext()
-    private var viewContext: NSManagedObjectContext = PersistenceController.shared.container.viewContext
+
+    @State private var isOverlayVisible = false
 
     init(video: Video) {
         self.video = video
@@ -31,8 +32,34 @@ struct VideoContextMenuView: View {
     }
 
     var body: some View {
-        if video.videoID != Video.fixtureID {
-            contextMenu
+        ZStack {
+            // Conditional overlay to block taps on underlying views
+            if isOverlayVisible {
+                Color.clear
+                    .contentShape(Rectangle())
+                #if !os(tvOS)
+                    // This is not available on tvOS < 16 so we leave out.
+                    // TODO: remove #if when setting the minimum deployment target to >= 16
+                    .onTapGesture {
+                        // Dismiss overlay without triggering other interactions
+                        isOverlayVisible = false
+                    }
+                #endif
+                    .ignoresSafeArea() // Ensure overlay covers the entire screen
+                    .accessibilityLabel("Dismiss context menu")
+                    .accessibilityHint("Tap to close the context")
+                    .accessibilityAddTraits(.isButton)
+            }
+
+            if video.videoID != Video.fixtureID {
+                contextMenu
+                    .onAppear {
+                        isOverlayVisible = true
+                    }
+                    .onDisappear {
+                        isOverlayVisible = false
+                    }
+            }
         }
     }
 
@@ -44,7 +71,7 @@ struct VideoContextMenuView: View {
             removeAllFromQueueButton()
         }
         if !video.localStreamIsDirectory {
-            if saveHistory {
+            if Defaults[.saveHistory] {
                 Section {
                     if let watchedAtString {
                         Text(watchedAtString)
@@ -70,6 +97,14 @@ struct VideoContextMenuView: View {
                     playNowInPictureInPictureButton
                     playNowInMusicMode
                 #endif
+            }
+
+            if Defaults[.showPlayNowInBackendContextMenu] {
+                Section {
+                    ForEach(PlayerBackendType.allCases, id: \.self) { backend in
+                        playNowInBackendButton(backend)
+                    }
+                }
             }
 
             Section {
@@ -161,6 +196,7 @@ struct VideoContextMenuView: View {
         Button {
             Watch.markAsWatched(videoID: video.videoID, account: accounts.current, duration: video.length, context: backgroundContext)
             FeedModel.shared.calculateUnwatchedFeed()
+            WatchModel.shared.watchesChanged()
         } label: {
             Label("Mark as watched", systemImage: "checkmark.circle.fill")
         }
@@ -184,6 +220,20 @@ struct VideoContextMenuView: View {
             player.play(video)
         } label: {
             Label("Play Now", systemImage: "play")
+        }
+    }
+
+    private func playNowInBackendButton(_ backend: PlayerBackendType) -> some View {
+        Button {
+            if player.musicMode {
+                player.toggleMusicMode()
+            }
+
+            player.forceBackendOnPlay = backend
+
+            player.play(video)
+        } label: {
+            Label("Play Now in \(backend.label)", systemImage: "play")
         }
     }
 

@@ -24,7 +24,7 @@ final class AccountsModel: ObservableObject {
             return nil
         }
 
-        return AccountsModel.find(id)
+        return Self.find(id)
     }
 
     var any: Account? {
@@ -62,6 +62,10 @@ final class AccountsModel: ObservableObject {
         cancellables.append(
             piped.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
         )
+    }
+
+    func find(_ id: Account.ID) -> Account? {
+        all.first { $0.id == id }
     }
 
     func configureAccount() {
@@ -108,8 +112,8 @@ final class AccountsModel: ObservableObject {
         Defaults[.accounts].first { $0.id == id }
     }
 
-    static func add(instance: Instance, name: String, username: String, password: String) -> Account {
-        let account = Account(instanceID: instance.id, name: name, urlString: instance.apiURLString)
+    static func add(instance: Instance, id: String? = UUID().uuidString, name: String, username: String, password: String) -> Account {
+        let account = Account(id: id, instanceID: instance.id, name: name, urlString: instance.apiURLString)
         Defaults[.accounts].append(account)
 
         setCredentials(account, username: username, password: password)
@@ -139,16 +143,5 @@ final class AccountsModel: ObservableObject {
             KeychainModel.shared.getAccountKey(account, "username"),
             KeychainModel.shared.getAccountKey(account, "password")
         )
-    }
-
-    static func removeDefaultsCredentials(_ account: Account) {
-        if let accountIndex = Defaults[.accounts].firstIndex(where: { $0.id == account.id }) {
-            var account = Defaults[.accounts][accountIndex]
-            account.name = ""
-            account.username = ""
-            account.password = nil
-
-            Defaults[.accounts][accountIndex] = account
-        }
     }
 }

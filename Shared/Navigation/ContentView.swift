@@ -8,32 +8,43 @@ import Siesta
 import SwiftUI
 
 struct ContentView: View {
-    @ObservedObject private var accounts = AccountsModel.shared
     @ObservedObject private var navigation = NavigationModel.shared
     @ObservedObject private var player = PlayerModel.shared
-    private var playlists = PlaylistsModel.shared
-    private var subscriptions = SubscribedChannelsModel.shared
 
     #if os(iOS)
         @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     #endif
 
-    var playerControls: PlayerControlsModel { .shared }
-
-    let persistenceController = PersistenceController.shared
+    @Default(.avPlayerUsesSystemControls) private var avPlayerUsesSystemControls
 
     var body: some View {
-        Group {
-            #if os(iOS)
-                if horizontalSizeClass == .compact {
-                    AppTabNavigation()
-                } else {
+        GeometryReader { proxy in
+            Group {
+                #if os(iOS)
+                    Group {
+                        if Constants.isIPhone {
+                            AppTabNavigation()
+                        } else {
+                            if horizontalSizeClass == .compact {
+                                AppTabNavigation()
+                            } else {
+                                AppSidebarNavigation()
+                            }
+                        }
+                    }
+                #elseif os(macOS)
                     AppSidebarNavigation()
-                }
-            #elseif os(macOS)
-                AppSidebarNavigation()
-            #elseif os(tvOS)
-                TVNavigationView()
+                #elseif os(tvOS)
+                    TVNavigationView()
+                #endif
+            }
+            #if !os(macOS)
+            .onAppear {
+                SafeAreaModel.shared.safeArea = proxy.safeAreaInsets
+            }
+            .onChange(of: proxy.safeAreaInsets) { newValue in
+                SafeAreaModel.shared.safeArea = newValue
+            }
             #endif
         }
         #if os(iOS)
@@ -57,9 +68,41 @@ struct ContentView: View {
                 SettingsView()
             }
         )
+        .modifier(ImportSettingsSheetViewModifier(isPresented: $navigation.presentingSettingsImportSheet, settingsFile: $navigation.settingsImportURL))
         .background(
             EmptyView().sheet(isPresented: $navigation.presentingAccounts) {
                 AccountsView()
+            }
+        )
+        .background(
+            EmptyView().sheet(isPresented: $navigation.presentingHomeSettings) {
+                #if os(macOS)
+                    VStack(alignment: .leading) {
+                        Button("Done") {
+                            navigation.presentingHomeSettings = false
+                        }
+                        .padding()
+                        .keyboardShortcut(.cancelAction)
+
+                        HomeSettings()
+                    }
+                    .frame(width: 500, height: 800)
+                #else
+                    NavigationView {
+                        HomeSettings()
+                        #if os(iOS)
+                            .toolbar {
+                                ToolbarItem(placement: .navigation) {
+                                    Button {
+                                        navigation.presentingHomeSettings = false
+                                    } label: {
+                                        Text("Done")
+                                    }
+                                }
+                            }
+                        #endif
+                    }
+                #endif
             }
         )
         #if !os(tvOS)
@@ -89,10 +132,6 @@ struct ContentView: View {
 
             NavigationModel.shared.presentingOpenVideos = false
         }
-        .onOpenURL { url in
-            URLBookmarkModel.shared.saveBookmark(url)
-            OpenURLHandler.shared.handle(url)
-        }
         .background(
             EmptyView().sheet(isPresented: $navigation.presentingAddToPlaylist) {
                 AddToPlaylistView(video: navigation.videoToAddToPlaylist)
@@ -116,16 +155,21 @@ struct ContentView: View {
                 OpenVideosView()
             }
         )
+        #if !os(macOS)
+        .background(
+            EmptyView().sheet(isPresented: $navigation.presentingChannelSheet) {
+                NavigationView {
+                    ChannelVideosView(channel: navigation.channelPresentedInSheet, showCloseButton: true)
+                }
+            }
+        )
+        #endif
         .alert(isPresented: $navigation.presentingAlert) { navigation.alert }
-    }
-
-    var navigationStyle: NavigationStyle {
         #if os(iOS)
-            return horizontalSizeClass == .compact ? .tab : .sidebar
-        #elseif os(tvOS)
-            return .tab
-        #else
-            return .sidebar
+            .statusBarHidden(player.playingFullScreen)
+        #endif
+        #if os(macOS)
+        .frame(minWidth: 1200, minHeight: 600)
         #endif
     }
 
@@ -134,16 +178,17 @@ struct ContentView: View {
             playerView
                 .transition(.asymmetric(insertion: .identity, removal: .opacity))
                 .zIndex(3)
-        } else if player.activeBackend == .appleAVPlayer {
+        } else if player.activeBackend == .appleAVPlayer,
+                  avPlayerUsesSystemControls || player.avPlayerBackend.isStartingPiP
+        {
             #if os(iOS)
-                playerView.offset(y: UIScreen.main.bounds.height)
+                AppleAVPlayerLayerView().offset(y: UIScreen.main.bounds.height)
             #endif
         }
     }
 
     var playerView: some View {
         VideoPlayerView()
-            .environment(\.navigationStyle, navigationStyle)
     }
 }
 

@@ -5,9 +5,11 @@ import UniformTypeIdentifiers
 
 struct HomeView: View {
     @ObservedObject private var accounts = AccountsModel.shared
+    @ObservedObject private var player = PlayerModel.shared
 
-    @State private var presentingEditFavorites = false
+    @State private var presentingHomeSettings = false
     @State private var favoritesChanged = false
+    @State private var updateTask: Task<Void, Never>?
 
     @FetchRequest(sortDescriptors: [.init(key: "watchedAt", ascending: false)])
     var watches: FetchedResults<Watch>
@@ -16,15 +18,10 @@ struct HomeView: View {
         @State private var recentDocumentsID = UUID()
     #endif
 
-    var favoritesObserver: Any?
-
     #if !os(tvOS)
         @Default(.favorites) private var favorites
+        @Default(.widgetsSettings) private var widgetsSettings
     #endif
-    #if os(iOS)
-        @Default(.homeRecentDocumentsItems) private var homeRecentDocumentsItems
-    #endif
-    @Default(.homeHistoryItems) private var homeHistoryItems
     @Default(.showFavoritesInHome) private var showFavoritesInHome
     @Default(.showOpenActionsInHome) private var showOpenActionsInHome
     @Default(.showQueueInHome) private var showQueueInHome
@@ -33,34 +30,51 @@ struct HomeView: View {
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
-            HStack {
-                #if os(tvOS)
-                    Group {
+            VStack {
+                #if !os(tvOS)
+                    HStack {
                         if showOpenActionsInHome {
-                            AccentButton(text: "Open Video", imageSystemName: "globe") {
+                            AccentButton(text: "Files", imageSystemName: "folder") {
+                                NavigationModel.shared.presentingFileImporter = true
+                            }
+                            AccentButton(text: "Paste", imageSystemName: "doc.on.clipboard.fill") {
+                                OpenVideosModel.shared.openURLsFromClipboard(playbackMode: .playNow)
+                            }
+                            AccentButton(imageSystemName: "ellipsis") {
                                 NavigationModel.shared.presentingOpenVideos = true
                             }
+                            .frame(maxWidth: 40)
                         }
-                        AccentButton(text: "Locations", imageSystemName: "globe") {
+                    }
+                #endif
+
+                #if os(tvOS)
+                    HStack {
+                        if showOpenActionsInHome {
+                            Button {
+                                NavigationModel.shared.presentingOpenVideos = true
+                            } label: {
+                                Label("Open Video", systemImage: "globe")
+                            }
+                        }
+                        Button {
                             NavigationModel.shared.presentingAccounts = true
+                        } label: {
+                            Label("Locations", systemImage: "globe")
                         }
-                        AccentButton(text: "Settings", imageSystemName: "gear") {
+                        Spacer()
+                        HideWatchedButtons()
+                        HideShortsButtons()
+                        Button {
                             NavigationModel.shared.presentingSettings = true
+                        } label: {
+                            Label("Settings", systemImage: "gear")
                         }
                     }
-                #else
-                    if showOpenActionsInHome {
-                        AccentButton(text: "Files", imageSystemName: "folder") {
-                            NavigationModel.shared.presentingFileImporter = true
-                        }
-                        AccentButton(text: "Paste", imageSystemName: "doc.on.clipboard.fill") {
-                            OpenVideosModel.shared.openURLsFromClipboard(playbackMode: .playNow)
-                        }
-                        AccentButton(imageSystemName: "ellipsis") {
-                            NavigationModel.shared.presentingOpenVideos = true
-                        }
-                        .frame(maxWidth: 40)
-                    }
+                    #if os(tvOS)
+                    .font(.caption)
+                    .imageScale(.small)
+                    #endif
                 #endif
             }
             .padding(.top, 15)
@@ -80,14 +94,14 @@ struct HomeView: View {
             }
 
             if !accounts.current.isNil, showFavoritesInHome {
-                LazyVStack(alignment: .leading) {
+                VStack(alignment: .leading) {
                     #if os(tvOS)
                         ForEach(Defaults[.favorites]) { item in
-                            FavoriteItemView(item: item)
+                            FavoriteItemView(item: item, favoritesChanged: $favoritesChanged)
                         }
                     #else
                         ForEach(favorites) { item in
-                            FavoriteItemView(item: item)
+                            FavoriteItemView(item: item, favoritesChanged: $favoritesChanged)
                             #if os(macOS)
                                 .workaroundForVerticalScrollingBug()
                             #endif
@@ -96,96 +110,37 @@ struct HomeView: View {
                 }
             }
 
-            #if os(iOS)
-                if homeRecentDocumentsItems > 0 {
-                    VStack {
-                        HStack {
-                            NavigationLink(destination: DocumentsView()) {
-                                HStack {
-                                    Text("Documents")
-                                        .font(.title3.bold())
-                                    Image(systemName: "chevron.right")
-                                        .imageScale(.small)
-                                }
-                                .lineLimit(1)
-                            }
-                            .padding(.leading, 15)
-
-                            Spacer()
-
-                            Button {
-                                recentDocumentsID = UUID()
-                            } label: {
-                                Label("Refresh", systemImage: "arrow.clockwise")
-                                    .font(.headline)
-                                    .labelStyle(.iconOnly)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-
-                        RecentDocumentsView(limit: homeRecentDocumentsItems)
-                            .id(recentDocumentsID)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    #if os(tvOS)
-                        .padding(.trailing, 40)
-                    #else
-                        .padding(.trailing, 15)
-                    #endif
-                }
-            #endif
-
-            if homeHistoryItems > 0 {
-                VStack {
-                    HStack {
-                        sectionLabel("History")
-                        Spacer()
-                        Button {
-                            navigation.presentAlert(
-                                Alert(
-                                    title: Text("Are you sure you want to clear history of watched videos?"),
-                                    message: Text("It cannot be reverted"),
-                                    primaryButton: .destructive(Text("Clear All")) {
-                                        PlayerModel.shared.removeHistory()
-                                        historyID = UUID()
-                                    },
-                                    secondaryButton: .cancel()
-                                )
-                            )
-                        } label: {
-                            Label("Clear History", systemImage: "trash")
-                                .font(.headline)
-                                .labelStyle(.iconOnly)
-                                .foregroundColor(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    #if os(tvOS)
-                        .padding(.trailing, 40)
-                    #else
-                        .padding(.trailing, 15)
-                    #endif
-
-                    HistoryView(limit: homeHistoryItems)
-                    #if os(tvOS)
-                        .padding(.horizontal, 40)
-                    #else
-                        .padding(.horizontal, 15)
-                    #endif
-                        .id(historyID)
-                }
-            }
-
             #if !os(tvOS)
                 Color.clear.padding(.bottom, 60)
             #endif
         }
         .onAppear {
-            Defaults.observe(.favorites) { _ in
-                favoritesChanged.toggle()
+            Task {
+                for await _ in Defaults.updates(.favorites) {
+                    favoritesChanged.toggle()
+                }
+                for await _ in Defaults.updates(.widgetsSettings) {
+                    favoritesChanged.toggle()
+                }
             }
-            .tieToLifetime(of: accounts)
+        }
+        .onDisappear {
+            updateTask?.cancel()
+        }
+
+        .onChange(of: player.presentingPlayer) { _ in
+            if player.presentingPlayer {
+                updateTask?.cancel()
+            } else {
+                Task {
+                    for await _ in Defaults.updates(.favorites) {
+                        favoritesChanged.toggle()
+                    }
+                    for await _ in Defaults.updates(.widgetsSettings) {
+                        favoritesChanged.toggle()
+                    }
+                }
+            }
         }
 
         .redrawOn(change: favoritesChanged)
@@ -197,10 +152,22 @@ struct HomeView: View {
         #endif
         #if os(macOS)
         .background(Color.secondaryBackground)
-        .frame(minWidth: 360)
+        .frame(minWidth: Constants.contentViewMinWidth)
+        .toolbar {
+            ToolbarItemGroup(placement: .automatic) {
+                HideWatchedButtons()
+                HideShortsButtons()
+                HomeSettingsButton()
+            }
+        }
         #endif
         #if os(iOS)
-        .navigationBarTitleDisplayMode(RefreshControl.navigationBarTitleDisplayMode)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                homeMenu
+            }
+        }
         #endif
         #if !os(macOS)
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
@@ -220,16 +187,47 @@ struct HomeView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .foregroundColor(.secondary)
     }
+
+    #if os(iOS)
+        var homeMenu: some View {
+            Menu {
+                Section {
+                    HideWatchedButtons()
+                    HideShortsButtons()
+                }
+                Section {
+                    Button {
+                        navigation.presentingHomeSettings = true
+                    } label: {
+                        Label("Home Settings", systemImage: "gear")
+                    }
+                }
+            } label: {
+                HStack(spacing: 12) {
+                    Text("Home")
+                        .foregroundColor(.primary)
+                        .font(.headline)
+
+                    Image(systemName: "chevron.down.circle.fill")
+                        .foregroundColor(.accentColor)
+                        .imageScale(.small)
+                }
+                .transaction { t in t.animation = nil }
+            }
+        }
+    #endif
 }
 
 struct Home_Previews: PreviewProvider {
     static var previews: some View {
         TabView {
-            HomeView()
-                .injectFixtureEnvironmentObjects()
-                .tabItem {
-                    Label("Home", systemImage: "house")
-                }
+            NavigationView {
+                HomeView()
+                    .injectFixtureEnvironmentObjects()
+                    .tabItem {
+                        Label("Home", systemImage: "house")
+                    }
+            }
         }
     }
 }

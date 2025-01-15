@@ -19,13 +19,13 @@ struct ChannelPlaylist: Identifiable {
             "title": title,
             "thumbnailURL": thumbnailURL?.absoluteString ?? "",
             "channel": channel?.json.object ?? "",
-            "videos": videos.map { $0.json.object },
+            "videos": videos.map(\.json.object),
             "videosCount": String(videosCount ?? 0)
         ]
     }
 
     static func from(_ json: JSON) -> Self {
-        ChannelPlaylist(
+        Self(
             id: json["id"].stringValue,
             title: json["title"].stringValue,
             thumbnailURL: json["thumbnailURL"].url,

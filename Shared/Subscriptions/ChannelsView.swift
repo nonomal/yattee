@@ -7,26 +7,54 @@ struct ChannelsView: View {
     @ObservedObject private var subscriptions = SubscribedChannelsModel.shared
     @ObservedObject private var accounts = AccountsModel.shared
     @ObservedObject private var feedCount = UnwatchedFeedCountModel.shared
+    private var navigation = NavigationModel.shared
 
     @Default(.showCacheStatus) private var showCacheStatus
+    @Default(.showUnwatchedFeedBadges) private var showUnwatchedFeedBadges
+    @Default(.keepChannelsWithUnwatchedFeedOnTop) private var keepChannelsWithUnwatchedFeedOnTop
+    @Default(.showChannelAvatarInChannelsLists) private var showChannelAvatarInChannelsLists
+
+    @State private var channelLinkActive = false
+    @State private var channelForLink: Channel?
 
     var body: some View {
         List {
             Section(header: header) {
-                ForEach(subscriptions.all) { channel in
-                    NavigationLink(destination: ChannelVideosView(channel: channel)) {
-                        HStack {
-                            if let url = channel.thumbnailURLOrCached {
-                                ThumbnailView(url: url)
-                                    .frame(width: 35, height: 35)
-                                    .clipShape(RoundedRectangle(cornerRadius: 35))
-                                Text(channel.name)
-                            } else {
-                                Label(channel.name, systemImage: RecentsModel.symbolSystemImage(channel.name))
-                            }
+                ForEach(channels) { channel in
+                    let label = HStack {
+                        if showChannelAvatarInChannelsLists {
+                            ChannelAvatarView(channel: channel, subscribedBadge: false)
+                                .frame(width: 35, height: 35)
+                        } else {
+                            Image(systemName: RecentsModel.symbolSystemImage(channel.name))
+                                .imageScale(.large)
+                                .foregroundColor(.accentColor)
+                                .frame(width: 35, height: 35)
                         }
-                        .backport
-                        .badge(feedCount.unwatchedByChannelText(channel))
+                        Text(channel.name)
+                            .lineLimit(1)
+                    }
+                    .backport
+                    .badge(showUnwatchedFeedBadges ? feedCount.unwatchedByChannelText(channel) : nil)
+
+                    Group {
+                        #if os(tvOS)
+                            Button {
+                                navigation.openChannel(channel, navigationStyle: .tab)
+                            } label: {
+                                label
+                            }
+                        #else
+                            Button {
+                                channelForLink = channel
+                                channelLinkActive = channelForLink != nil
+                            } label: {
+                                label
+                                    .contentShape(Rectangle())
+                                    .foregroundColor(.primary)
+                            }
+                            .buttonStyle(.plain)
+                        #endif
                     }
                     .contextMenu {
                         if subscriptions.isSubscribing(channel.id) {
@@ -49,6 +77,11 @@ struct ChannelsView: View {
                     .listRowSeparator(false)
             }
         }
+        #if !os(tvOS)
+        .background(
+            NavigationLink(destination: ChannelVideosView(channel: channelForLink ?? Video.fixture.channel), isActive: $channelLinkActive, label: EmptyView.init)
+        )
+        #endif
         .onAppear {
             subscriptions.load()
         }
@@ -85,6 +118,10 @@ struct ChannelsView: View {
         #endif
     }
 
+    var channels: [Channel] {
+        keepChannelsWithUnwatchedFeedOnTop ? subscriptions.allByUnwatchedCount : subscriptions.all
+    }
+
     var header: some View {
         HStack {
             #if os(tvOS)
@@ -110,7 +147,7 @@ struct ChannelsView: View {
                     Label("Refresh", systemImage: "arrow.clockwise")
                         .labelStyle(.iconOnly)
                         .imageScale(.small)
-                        .font(.caption2)
+                        .font(.caption)
                 }
 
             #endif

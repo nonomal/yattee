@@ -2,16 +2,17 @@ import Defaults
 import SwiftUI
 
 struct AppSidebarRecents: View {
-    @ObservedObject private var navigation = NavigationModel.shared
     var recents = RecentsModel.shared
 
     @Default(.recentlyOpened) private var recentItems
+    @Default(.limitRecents) private var limitRecents
+    @Default(.limitRecentsAmount) private var limitRecentsAmount
 
     var body: some View {
         Group {
             if !recentItems.isEmpty {
                 Section(header: Text("Recents")) {
-                    ForEach(recentItems.reversed()) { recent in
+                    ForEach(recentItems.reversed().prefix(limitRecents ? limitRecentsAmount : recentItems.count)) { recent in
                         Group {
                             switch recent.type {
                             case .channel:
@@ -51,6 +52,8 @@ struct RecentNavigationLink<DestinationContent: View>: View {
     var recents = RecentsModel.shared
     @ObservedObject private var navigation = NavigationModel.shared
 
+    @Default(.showChannelAvatarInChannelsLists) private var showChannelAvatarInChannelsLists
+
     var recent: RecentItem
     var systemImage: String?
     let destination: DestinationContent
@@ -72,9 +75,10 @@ struct RecentNavigationLink<DestinationContent: View>: View {
             HStack {
                 if recent.type == .channel,
                    let channel = recent.channel,
-                   channel.thumbnailURLOrCached != nil
+                   showChannelAvatarInChannelsLists
                 {
                     ChannelAvatarView(channel: channel, subscribedBadge: false)
+                        .id("channel-avatar-\(channel.id)")
                         .frame(width: Constants.sidebarChannelThumbnailSize, height: Constants.sidebarChannelThumbnailSize)
 
                     Text(channel.name)

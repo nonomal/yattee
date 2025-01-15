@@ -1,12 +1,13 @@
 import SwiftUI
 
 struct HistoryView: View {
-    var limit = 10
+    var limit: Int
 
     @FetchRequest(sortDescriptors: [.init(key: "watchedAt", ascending: false)])
     var watches: FetchedResults<Watch>
 
     @ObservedObject private var player = PlayerModel.shared
+    @State private var visibleWatches = [Watch]()
 
     var body: some View {
         LazyVStack {
@@ -18,31 +19,28 @@ struct HistoryView: View {
                     }.foregroundColor(.secondary)
                 }
             } else {
-                ForEach(visibleWatches, id: \.videoID) { watch in
-                    let video = player.historyVideo(watch.videoID) ?? watch.video
-
-                    ContentItemView(item: .init(video: video))
-                        .environment(\.listingStyle, .list)
-                        .contextMenu {
-                            VideoContextMenuView(video: video)
-                        }
-                }
+                ListView(items: contentItems, limit: limit)
             }
         }
         .animation(nil, value: visibleWatches)
-        .onAppear {
-            visibleWatches
-                .forEach(player.loadHistoryVideoDetails)
-        }
+        .onChange(of: player.currentVideo) { _ in reloadVisibleWatches() }
     }
 
-    private var visibleWatches: [Watch] {
-        Array(watches.filter { $0.videoID != player.currentVideo?.videoID }.prefix(limit))
+    var contentItems: [ContentItem] {
+        visibleWatches.map { .init(video: player.historyVideo($0.videoID) ?? $0.video) }
+    }
+
+    func reloadVisibleWatches() {
+        visibleWatches = Array(watches.filter { $0.videoID != player.currentVideo?.videoID }.prefix(limit))
+    }
+
+    init(limit: Int = 10) {
+        self.limit = limit
     }
 }
 
 struct HistoryView_Previews: PreviewProvider {
     static var previews: some View {
-        HistoryView()
+        HistoryView(limit: 10)
     }
 }

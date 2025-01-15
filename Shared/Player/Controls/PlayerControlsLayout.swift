@@ -30,7 +30,6 @@ enum PlayerControlsLayout: String, CaseIterable, Defaults.Serializable {
             #else
                 return isIPad
             #endif
-
         case .large:
             return true
         case .medium:
@@ -264,7 +263,7 @@ enum PlayerControlsLayout: String, CaseIterable, Defaults.Serializable {
     var seekOSDWidth: Double {
         switch self {
         case .tvRegular:
-            return 240
+            return 280
         case .veryLarge:
             return 240
         case .large:

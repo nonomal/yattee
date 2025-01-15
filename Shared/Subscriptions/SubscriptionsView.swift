@@ -27,11 +27,22 @@ struct SubscriptionsView: View {
             }
         }
         .environment(\.listingStyle, subscriptionsListingStyle)
-
         #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
+                    HStack {
+                        Picker("Page", selection: $subscriptionsViewPage) {
+                            Label("Feed", systemImage: "film").tag(Page.feed)
+                            Label("Channels", systemImage: "person.3.fill").tag(Page.channels)
+                        }
+                        .pickerStyle(.segmented)
+                        .labelStyle(.titleOnly)
+                    }
+                    .frame(maxWidth: 500)
+                }
+
+                ToolbarItem(placement: .navigationBarTrailing) {
                     subscriptionsMenu
                 }
 
@@ -42,16 +53,14 @@ struct SubscriptionsView: View {
         #endif
         #if os(macOS)
         .toolbar {
-            ToolbarItem {
+            ToolbarItemGroup {
                 ListingStyleButtons(listingStyle: $subscriptionsListingStyle)
-            }
-
-            ToolbarItem {
+                HideWatchedButtons()
+                HideShortsButtons()
                 toggleWatchedButton
-            }
-
-            ToolbarItem {
+                    .id(feed.watchedId)
                 playUnwatchedButton
+                    .id(feed.watchedId)
             }
         }
         #endif
@@ -64,30 +73,27 @@ struct SubscriptionsView: View {
     #if os(iOS)
         var subscriptionsMenu: some View {
             Menu {
-                Picker("Page", selection: $subscriptionsViewPage) {
-                    Label("Feed", systemImage: "film").tag(Page.feed)
-                    Label("Channels", systemImage: "person.3.fill").tag(Page.channels)
-                }
-
                 if subscriptionsViewPage == .feed {
                     ListingStyleButtons(listingStyle: $subscriptionsListingStyle)
+
+                    Section {
+                        HideWatchedButtons()
+                        HideShortsButtons()
+                    }
+
+                    playUnwatchedButton
+
+                    toggleWatchedButton
                 }
-
-                playUnwatchedButton
-
-                toggleWatchedButton
 
                 Section {
                     SettingsButtons()
                 }
             } label: {
-                HStack(spacing: 12) {
-                    menuLabel
-                        .foregroundColor(.primary)
-
+                HStack {
                     Image(systemName: "chevron.down.circle.fill")
                         .foregroundColor(.accentColor)
-                        .imageScale(.small)
+                        .imageScale(.large)
                 }
                 .transaction { t in t.animation = nil }
             }
@@ -109,6 +115,7 @@ struct SubscriptionsView: View {
         } label: {
             Label("Play all unwatched", systemImage: "play")
         }
+        .help("Play all unwatched")
         .disabled(!feed.canPlayUnwatchedFeed)
     }
 
@@ -126,6 +133,7 @@ struct SubscriptionsView: View {
         } label: {
             Label("Mark all as watched", systemImage: "checkmark.circle.fill")
         }
+        .help("Mark all as watched")
         .disabled(!feed.canMarkAllFeedAsWatched)
     }
 
@@ -135,6 +143,7 @@ struct SubscriptionsView: View {
         } label: {
             Label("Mark all as unwatched", systemImage: "checkmark.circle")
         }
+        .help("Mark all as unwatched")
     }
 }
 

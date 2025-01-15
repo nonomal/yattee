@@ -215,7 +215,7 @@ extension Country {
         case .lk: return "Sri Lanka"
         case .se: return "Sweden"
         case .ch: return "Switzerland"
-        case .tw: return "Taiwan, Province of China[a]"
+        case .tw: return "Taiwan"
         case .tz: return "Tanzania, United Republic of"
         case .th: return "Thailand"
         case .tn: return "Tunisia"
@@ -233,6 +233,8 @@ extension Country {
         case .zw: return "Zimbabwe"
         }
     }
+
+    // swiftlint:enable switch_case_on_newline
 
     var flag: String {
         let unicodeScalars = rawValue
@@ -272,7 +274,7 @@ extension Country {
 
     private static func filteredCountries(_ predicate: (String) -> Bool) -> [Country] {
         Country.allCases
-            .map { $0.name }
+            .map(\.name)
             .filter(predicate)
             .compactMap { string in Country.allCases.first { $0.name == string } }
     }

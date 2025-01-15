@@ -6,8 +6,15 @@ struct VideoActions: View {
         case share
         case addToPlaylist
         case subscribe
+        case fullScreen
+        case pip
+        #if os(iOS)
+            case lockOrientation
+        #endif
+        case restart
+        case advanceToNextItem
+        case musicMode
         case settings
-        case next
         case hide
         case close
     }
@@ -19,17 +26,20 @@ struct VideoActions: View {
 
     var video: Video?
 
-    @Default(.openWatchNextOnClose) private var openWatchNextOnClose
     @Default(.playerActionsButtonLabelStyle) private var playerActionsButtonLabelStyle
 
     @Default(.actionButtonShareEnabled) private var actionButtonShareEnabled
     @Default(.actionButtonAddToPlaylistEnabled) private var actionButtonAddToPlaylistEnabled
     @Default(.actionButtonSubscribeEnabled) private var actionButtonSubscribeEnabled
     @Default(.actionButtonSettingsEnabled) private var actionButtonSettingsEnabled
-    @Default(.actionButtonNextEnabled) private var actionButtonNextEnabled
+    @Default(.actionButtonFullScreenEnabled) private var actionButtonFullScreenEnabled
+    @Default(.actionButtonPipEnabled) private var actionButtonPipEnabled
+    @Default(.actionButtonLockOrientationEnabled) private var actionButtonLockOrientationEnabled
+    @Default(.actionButtonRestartEnabled) private var actionButtonRestartEnabled
+    @Default(.actionButtonAdvanceToNextItemEnabled) private var actionButtonAdvanceToNextItemEnabled
+    @Default(.actionButtonMusicModeEnabled) private var actionButtonMusicModeEnabled
     @Default(.actionButtonHideEnabled) private var actionButtonHideEnabled
     @Default(.actionButtonCloseEnabled) private var actionButtonCloseEnabled
-    @Default(.actionButtonNextQueueCountEnabled) private var actionButtonNextQueueCountEnabled
 
     var body: some View {
         HStack(spacing: 6) {
@@ -55,8 +65,20 @@ struct VideoActions: View {
             return actionButtonSubscribeEnabled
         case .settings:
             return actionButtonSettingsEnabled
-        case .next:
-            return actionButtonNextEnabled
+        case .fullScreen:
+            return actionButtonFullScreenEnabled
+        case .pip:
+            return actionButtonPipEnabled
+        #if os(iOS)
+            case .lockOrientation:
+                return actionButtonLockOrientationEnabled
+        #endif
+        case .restart:
+            return actionButtonRestartEnabled
+        case .advanceToNextItem:
+            return actionButtonAdvanceToNextItemEnabled
+        case .musicMode:
+            return actionButtonMusicModeEnabled
         case .hide:
             return actionButtonHideEnabled
         case .close:
@@ -64,15 +86,29 @@ struct VideoActions: View {
         }
     }
 
+    func isAnyActionVisible() -> Bool {
+        return Action.allCases.contains { isVisible($0) }
+    }
+
     func isActionable(_ action: Action) -> Bool {
         switch action {
         case .share:
             return video?.isShareable ?? false
         case .addToPlaylist:
-            return !(video?.isLocal ?? true)
+            return !(video?.isLocal ?? true) && accounts.signedIn
         case .subscribe:
             return !(video?.isLocal ?? true) && accounts.signedIn && accounts.app.supportsSubscriptions
         case .settings:
+            return video != nil
+        case .fullScreen:
+            return video != nil
+        case .pip:
+            return video != nil
+        case .advanceToNextItem:
+            return player.isAdvanceToNextItemAvailable
+        case .restart:
+            return video != nil
+        case .musicMode:
             return video != nil
         default:
             return true
@@ -116,6 +152,22 @@ struct VideoActions: View {
                             }
                         }
                     }
+                case .fullScreen:
+                    actionButton("Fullscreen", systemImage: player.fullscreenImage, action: player.toggleFullScreenAction)
+                case .pip:
+                    actionButton("PiP", systemImage: player.pipImage, active: player.playingInPictureInPicture, action: player.togglePiPAction)
+                #if os(iOS)
+                    case .lockOrientation:
+                        actionButton("Lock", systemImage: player.lockOrientationImage, active: player.isOrientationLocked, action: player.lockOrientationAction)
+                #endif
+                case .restart:
+                    actionButton("Replay", systemImage: "backward.end.fill", action: player.replayAction)
+                case .advanceToNextItem:
+                    actionButton("Next", systemImage: "forward.fill") {
+                        player.advanceToNextItem()
+                    }
+                case .musicMode:
+                    actionButton("Music", systemImage: "music.note", active: player.musicMode, action: player.toggleMusicMode)
                 case .settings:
                     actionButton("Settings", systemImage: "gear") {
                         withAnimation(ControlOverlaysModel.animation) {
@@ -126,23 +178,13 @@ struct VideoActions: View {
                             #endif
                         }
                     }
-                case .next:
-                    actionButton(nextLabel, systemImage: Constants.nextSystemImage) {
-                        WatchNextViewModel.shared.userInteractedOpen(player.currentItem)
-                    }
                 case .hide:
                     actionButton("Hide", systemImage: "chevron.down") {
                         player.hide(animate: true)
                     }
-
                 case .close:
                     actionButton("Close", systemImage: "xmark") {
-                        if player.presentingPlayer, openWatchNextOnClose {
-                            player.pause()
-                            WatchNextViewModel.shared.closed(player.currentItem)
-                        } else {
-                            player.closeCurrentItem()
-                        }
+                        player.closeCurrentItem()
                     }
                 }
             }
@@ -150,28 +192,23 @@ struct VideoActions: View {
         }
     }
 
-    var nextLabel: String {
-        if actionButtonNextQueueCountEnabled, !player.queue.isEmpty {
-            return "\("Next".localized()) • \(player.queue.count)"
-        }
-
-        return "Next".localized()
-    }
-
     func actionButton(
         _ name: String,
         systemImage: String,
+        active: Bool = false,
         action: @escaping () -> Void = {}
     ) -> some View {
         Button(action: action) {
             VStack(spacing: 3) {
                 Image(systemName: systemImage)
                     .frame(width: 20, height: 20)
+                    .foregroundColor(active ? Color("AppRedColor") : .primary)
                 if playerActionsButtonLabelStyle.text {
                     Text(name.localized())
-                        .foregroundColor(.secondary)
+                        .foregroundColor(active ? Color("AppRedColor") : .primary)
                         .font(.caption2)
                         .allowsTightening(true)
+                        .lineLimit(1)
                 }
             }
             .padding(.horizontal, playerActionsButtonLabelStyle.text ? 6 : 12)

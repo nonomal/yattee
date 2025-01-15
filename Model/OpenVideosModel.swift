@@ -37,7 +37,7 @@ struct OpenVideosModel {
         }
     }
 
-    static let shared = OpenVideosModel()
+    static let shared = Self()
     var player: PlayerModel! = .shared
     var logger = Logger(label: "stream.yattee.open-videos")
 
@@ -63,7 +63,7 @@ struct OpenVideosModel {
         return []
     }
 
-    func openURLsFromClipboard(removeQueueItems: Bool = false, playbackMode: OpenVideosModel.PlaybackMode = .playNow) {
+    func openURLsFromClipboard(removeQueueItems: Bool = false, playbackMode: Self.PlaybackMode = .playNow) {
         if urlsFromClipboard.isEmpty {
             NavigationModel.shared.alert = Alert(title: Text("Could not find any links to open in your clipboard".localized()))
             if NavigationModel.shared.presentingOpenVideos {
@@ -76,7 +76,7 @@ struct OpenVideosModel {
         }
     }
 
-    func openURLs(_ urls: [URL], removeQueueItems: Bool = false, playbackMode: OpenVideosModel.PlaybackMode = .playNow) {
+    func openURLs(_ urls: [URL], removeQueueItems: Bool = false, playbackMode: Self.PlaybackMode = .playNow) {
         guard !urls.isEmpty else {
             return
         }
@@ -107,7 +107,7 @@ struct OpenVideosModel {
             prepending: playbackMode == .playNow || playbackMode == .playNext
         )
 
-        WatchNextViewModel.shared.hide()
+        NavigationModel.shared.presentingChannelSheet = false
 
         if playbackMode == .playNow || playbackMode == .shuffleAll {
             #if os(iOS)
@@ -147,7 +147,7 @@ struct OpenVideosModel {
         if prepending {
             videos.reverse()
         }
-        videos.forEach { video in
+        for video in videos {
             player.enqueueVideo(video, play: false, prepending: prepending, loadDetails: false)
         }
     }

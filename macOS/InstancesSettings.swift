@@ -144,12 +144,15 @@ struct InstancesSettings: View {
                 }
             }
 
-            Button("Add Location...") {
-                presentingInstanceForm = true
+            HStack {
+                Button("Add Location...") {
+                    presentingInstanceForm = true
+                }
+                Spacer()
+                AddPublicInstanceButton()
             }
         }
         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-
         .onAppear {
             selectedInstanceID = instances.first?.id
             frontendURL = selectedInstanceFrontendURL

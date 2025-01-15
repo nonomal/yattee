@@ -1,10 +1,14 @@
+import Defaults
 import SwiftUI
 
 struct PlayerBackendView: View {
     #if os(iOS)
         @Environment(\.verticalSizeClass) private var verticalSizeClass
+        @ObservedObject private var safeAreaModel = SafeAreaModel.shared
     #endif
     @ObservedObject private var player = PlayerModel.shared
+
+    @Default(.avPlayerUsesSystemControls) private var avPlayerUsesSystemControls
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -15,27 +19,37 @@ struct PlayerBackendView: View {
                         case .mpv:
                             player.mpvPlayerView
                         case .appleAVPlayer:
-                            player.avPlayerView
+                            #if os(tvOS)
+                                AppleAVPlayerView()
+                            #else
+                                if avPlayerUsesSystemControls,
+                                   !player.playingInPictureInPicture,
+                                   !player.avPlayerBackend.isStartingPiP
+                                {
+                                    AppleAVPlayerView()
+                                } else if !avPlayerUsesSystemControls ||
+                                    player.playingInPictureInPicture ||
+                                    player.avPlayerBackend.isStartingPiP
+                                {
+                                    AppleAVPlayerLayerView()
+                                }
+                            #endif
                         }
                     }
                     .zIndex(0)
-
-                    ControlsGradientView()
-                        .zIndex(1)
                 }
             }
             .overlay(GeometryReader { proxy in
                 Color.clear
                     .onAppear { player.playerSize = proxy.size }
                     .onChange(of: proxy.size) { _ in player.playerSize = proxy.size }
-                    .onChange(of: player.controls.presentingOverlays) { _ in player.playerSize = proxy.size }
+                    .onChange(of: player.currentItem?.id) { _ in player.playerSize = proxy.size }
             })
-            #if os(iOS)
-            .padding(.top, player.playingFullScreen && verticalSizeClass == .regular ? 20 : 0)
-            #endif
 
             #if !os(tvOS)
-                PlayerGestures()
+                if player.activeBackend == .mpv || !avPlayerUsesSystemControls {
+                    PlayerGestures()
+                }
                 PlayerControls()
                 #if os(iOS)
                     .padding(.top, controlsTopPadding)
@@ -55,20 +69,16 @@ struct PlayerBackendView: View {
             guard player.playingFullScreen else { return 0 }
 
             if UIDevice.current.userInterfaceIdiom != .pad {
-                return verticalSizeClass == .compact ? SafeArea.insets.top : 0
-            } else {
-                return SafeArea.insets.top.isZero ? SafeArea.insets.bottom : SafeArea.insets.top
+                return verticalSizeClass == .compact ? safeAreaModel.safeArea.top : 0
             }
+            return safeAreaModel.safeArea.top.isZero ? safeAreaModel.safeArea.bottom : safeAreaModel.safeArea.top
         }
 
         var controlsBottomPadding: Double {
-            guard player.playingFullScreen else { return 0 }
-
             if UIDevice.current.userInterfaceIdiom != .pad {
-                return player.playingFullScreen && verticalSizeClass == .compact ? SafeArea.insets.bottom : 0
-            } else {
-                return player.playingFullScreen ? SafeArea.insets.bottom : 0
+                return player.playingFullScreen || verticalSizeClass == .compact ? safeAreaModel.safeArea.bottom : 0
             }
+            return player.playingFullScreen ? safeAreaModel.safeArea.bottom : 0
         }
     #endif
 

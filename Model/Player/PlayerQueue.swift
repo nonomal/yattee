@@ -10,11 +10,12 @@ extension PlayerModel {
     }
 
     var videoForDisplay: Video? {
-        videoBeingOpened ?? (closing ? nil : currentVideo)
+        videoBeingOpened ?? currentVideo
     }
 
     func play(_ videos: [Video], shuffling: Bool = false) {
-        WatchNextViewModel.shared.hide()
+        navigation.presentingChannelSheet = false
+
         playbackMode = shuffling ? .shuffle : .queue
 
         videos.forEach { enqueueVideo($0, loadDetails: false) }
@@ -33,6 +34,8 @@ extension PlayerModel {
     }
 
     func playNow(_ video: Video, at time: CMTime? = nil) {
+        navigation.presentingChannelSheet = false
+
         if playingInPictureInPicture, closePiPOnNavigation {
             closePiP()
         }
@@ -55,7 +58,7 @@ extension PlayerModel {
 
         comments.reset()
         stream = nil
-        WatchNextViewModel.shared.hide()
+        navigation.presentingChannelSheet = false
 
         withAnimation {
             aspectRatio = VideoPlayerView.defaultAspectRatio
@@ -85,13 +88,15 @@ extension PlayerModel {
             guard let playerInstance = self.playerInstance else { return }
             let streamsInstance = video.streams.compactMap(\.instance).first
 
-            if video.streams.isEmpty || streamsInstance != playerInstance {
+            if video.streams.isEmpty || streamsInstance.isNil || streamsInstance!.apiURLString != playerInstance.apiURLString {
                 self.loadAvailableStreams(video) { [weak self] _ in
                     self?.videoBeingOpened = nil
                 }
             } else {
                 self.videoBeingOpened = nil
-                self.availableStreams = self.streamsWithInstance(instance: playerInstance, streams: video.streams)
+                self.streamsWithInstance(instance: playerInstance, streams: video.streams) { processedStreams in
+                    self.availableStreams = processedStreams
+                }
             }
         }
     }
@@ -102,6 +107,7 @@ extension PlayerModel {
 
     func playerAPI(_ video: Video) -> VideosAPI? {
         guard let url = video.instanceURL else { return accounts.api }
+        if accounts.current?.url == url { return accounts.api }
         switch video.app {
         case .local:
             return nil
@@ -121,14 +127,32 @@ extension PlayerModel {
     var streamByQualityProfile: Stream? {
         let profile = qualityProfile ?? .defaultProfile
 
+        // First attempt: Filter by both `canPlay` and `isPreferred`
         if let streamPreferredForProfile = backend.bestPlayable(
             availableStreams.filter { backend.canPlay($0) && profile.isPreferred($0) },
-            maxResolution: profile.resolution
+            maxResolution: profile.resolution, formatOrder: profile.formats
         ) {
             return streamPreferredForProfile
         }
 
-        return backend.bestPlayable(availableStreams.filter { backend.canPlay($0) }, maxResolution: profile.resolution)
+        // Fallback: Filter by `canPlay` only
+        let fallbackStream = backend.bestPlayable(
+            availableStreams.filter { backend.canPlay($0) },
+            maxResolution: profile.resolution, formatOrder: profile.formats
+        )
+
+        // If no stream is found, trigger the error handler
+        guard let finalStream = fallbackStream else {
+            let error = RequestError(
+                userMessage: "No supported streams available.",
+                cause: NSError(domain: "stream.yatte.app", code: -1, userInfo: [NSLocalizedDescriptionKey: "No supported streams available"])
+            )
+            videoLoadFailureHandler(error, video: currentVideo)
+            return nil
+        }
+
+        // Return the found stream
+        return finalStream
     }
 
     func advanceToNextItem() {
@@ -175,7 +199,7 @@ extension PlayerModel {
 
         remove(newItem)
 
-        WatchNextViewModel.shared.hide()
+        navigation.presentingChannelSheet = false
         currentItem = newItem
         currentItem.playbackTime = time
 
@@ -219,9 +243,11 @@ extension PlayerModel {
         let item = PlayerQueueItem(video, playbackTime: atTime)
 
         if play {
+            navigation.presentingChannelSheet = false
+
             withAnimation {
                 aspectRatio = VideoPlayerView.defaultAspectRatio
-                WatchNextViewModel.shared.hide()
+                navigation.presentingChannelSheet = false
                 currentItem = item
             }
             videoBeingOpened = video
@@ -252,7 +278,7 @@ extension PlayerModel {
                 if let video = currentVideo, !historyVideos.contains(where: { $0 == video }) {
                     historyVideos.append(video)
                 }
-                updateWatch(finished: finished)
+                updateWatch(finished: finished, time: backend.currentTime)
             }
 
             if let video = currentItem.video,
@@ -323,16 +349,41 @@ extension PlayerModel {
         }
 
         playerAPI(video)?
-            .loadDetails(item, completionHandler: { [weak self] newItem in
+            .loadDetails(item, failureHandler: nil) { [weak self] newItem in
                 guard let self else { return }
 
                 replaceQueueItem(newItem)
 
                 self.logger.info("LOADED queue details: \(videoID)")
-            })
+            }
     }
 
     private func videoLoadFailureHandler(_ error: RequestError, video: Video? = nil) {
+        guard let video else {
+            presentErrorAlert(error)
+            return
+        }
+
+        let videoID = video.videoID
+        let currentRetry = retryAttempts[videoID] ?? 0
+
+        if currentRetry < Defaults[.videoLoadingRetryCount] {
+            retryAttempts[videoID] = currentRetry + 1
+
+            logger.info("Retry attempt \(currentRetry + 1) for video \(videoID) due to error: \(error)")
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                guard let self else { return }
+                self.enqueueVideo(video, play: true, prepending: true, loadDetails: true)
+            }
+            return
+        }
+
+        retryAttempts[videoID] = 0
+        presentErrorAlert(error, video: video)
+    }
+
+    private func presentErrorAlert(_ error: RequestError, video: Video? = nil) {
         var message = error.userMessage
         if let errorDictionary = error.json.dictionaryObject,
            let errorMessage = errorDictionary["message"] ?? errorDictionary["error"],
@@ -359,10 +410,7 @@ extension PlayerModel {
                 message: Text(message),
                 primaryButton: .cancel { [weak self] in
                     guard let self else { return }
-                    self.advancing = false
-                    self.videoBeingOpened = nil
-                    self.currentItem = nil
-                    self.hide()
+                    self.closeCurrentItem()
                 },
                 secondaryButton: retryButton
             )

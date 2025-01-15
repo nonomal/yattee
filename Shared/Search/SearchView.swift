@@ -30,6 +30,7 @@ struct SearchView: View {
     @Default(.saveRecents) private var saveRecents
     @Default(.showHome) private var showHome
     @Default(.searchListingStyle) private var searchListingStyle
+    @Default(.showSearchSuggestions) private var showSearchSuggestions
 
     private var videos = [Video]()
 
@@ -38,9 +39,9 @@ struct SearchView: View {
         self.videos = videos
     }
 
-    var body: some View {
-        VStack {
-            #if os(iOS)
+    #if os(iOS)
+        var body: some View {
+            VStack {
                 VStack {
                     if accounts.app.supportsSearchSuggestions, state.query.query != state.queryText {
                         SearchSuggestions()
@@ -51,77 +52,98 @@ struct SearchView: View {
                 }
                 .backport
                 .scrollDismissesKeyboardInteractively()
-            #else
+            }
+            .environment(\.listingStyle, searchListingStyle)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    if #available(iOS 15, *) {
+                        FocusableSearchTextField()
+                    } else {
+                        SearchTextField()
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    searchMenu
+                }
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .ignoresSafeArea(.keyboard, edges: .bottom)
+            .navigationTitle("Search")
+            .onAppear {
+                if let query {
+                    state.queryText = query.query
+                    state.resetQuery(query)
+                    updateFavoriteItem()
+                }
+
+                if !videos.isEmpty {
+                    state.store.replace(ContentItem.array(of: videos))
+                }
+            }
+            .onChange(of: accounts.current) { _ in
+                state.reloadQuery()
+            }
+            .onChange(of: state.queryText) { newQuery in
+                if newQuery.isEmpty {
+                    favoriteItem = nil
+                    state.resetQuery()
+                } else {
+                    updateFavoriteItem()
+                }
+                state.loadSuggestions(newQuery)
+            }
+            .onChange(of: searchSortOrder) { order in
+                state.changeQuery { query in
+                    query.sortBy = order
+                    updateFavoriteItem()
+                }
+            }
+            .onChange(of: searchDate) { date in
+                state.changeQuery { query in
+                    query.date = date
+                    updateFavoriteItem()
+                }
+            }
+            .onChange(of: searchDuration) { duration in
+                state.changeQuery { query in
+                    query.duration = duration
+                    updateFavoriteItem()
+                }
+            }
+        }
+
+    #elseif os(tvOS)
+        var body: some View {
+            VStack {
                 ZStack {
                     results
-
-                    #if os(macOS)
-                        if accounts.app.supportsSearchSuggestions, state.query.query != state.queryText {
-                            HStack {
-                                Spacer()
-                                SearchSuggestions()
-                                    .borderLeading(width: 1, color: Color("ControlsBorderColor"))
-                                    .frame(maxWidth: 280)
-                                    .opacity(state.queryText.isEmpty ? 0 : 1)
-                            }
-                        }
-                    #endif
                 }
-            #endif
-        }
-        .environment(\.listingStyle, searchListingStyle)
-        .toolbar {
-            #if os(macOS)
-                ToolbarItemGroup(placement: toolbarPlacement) {
-                    ListingStyleButtons(listingStyle: $searchListingStyle)
-                    FavoriteButton(item: favoriteItem)
-                        .id(favoriteItem?.id)
-
-                    if accounts.app.supportsSearchFilters {
-                        Section {
-                            HStack {
-                                Text("Sort:")
-                                    .foregroundColor(.secondary)
-
-                                searchSortOrderPicker
-                            }
-                        }
-                        .transaction { t in t.animation = .none }
-                    }
-
-                    if accounts.app.supportsSearchFilters {
-                        filtersMenu
-                    }
-
-                    SearchTextField()
+            }
+            .environment(\.listingStyle, searchListingStyle)
+            .onAppear {
+                if let query {
+                    state.queryText = query.query
+                    state.resetQuery(query)
+                    updateFavoriteItem()
                 }
-            #endif
-        }
-        .onAppear {
-            if let query {
-                state.queryText = query.query
-                state.resetQuery(query)
-                updateFavoriteItem()
-            }
 
-            if !videos.isEmpty {
-                state.store.replace(ContentItem.array(of: videos))
+                if !videos.isEmpty {
+                    state.store.replace(ContentItem.array(of: videos))
+                }
             }
-        }
-        .onChange(of: accounts.current) { _ in
-            state.reloadQuery()
-        }
-        .onChange(of: state.queryText) { newQuery in
-            if newQuery.isEmpty {
-                favoriteItem = nil
-                state.resetQuery()
-            } else {
-                updateFavoriteItem()
+            .onChange(of: accounts.current) { _ in
+                state.reloadQuery()
             }
-
-            state.loadSuggestions(newQuery)
-
-            #if os(tvOS)
+            .onChange(of: state.queryText) { newQuery in
+                if newQuery.isEmpty {
+                    favoriteItem = nil
+                    state.resetQuery()
+                } else {
+                    updateFavoriteItem()
+                }
+                if showSearchSuggestions {
+                    state.loadSuggestions(newQuery)
+                }
                 searchDebounce.invalidate()
                 recentsDebounce.invalidate()
 
@@ -134,51 +156,125 @@ struct SearchView: View {
                 recentsDebounce.debouncing(10) {
                     recents.addQuery(newQuery)
                 }
-            #endif
-        }
-        .onChange(of: searchSortOrder) { order in
-            state.changeQuery { query in
-                query.sortBy = order
-                updateFavoriteItem()
             }
-        }
-        .onChange(of: searchDate) { date in
-            state.changeQuery { query in
-                query.date = date
-                updateFavoriteItem()
+            .onChange(of: searchSortOrder) { order in
+                state.changeQuery { query in
+                    query.sortBy = order
+                    updateFavoriteItem()
+                }
             }
-        }
-        .onChange(of: searchDuration) { duration in
-            state.changeQuery { query in
-                query.duration = duration
-                updateFavoriteItem()
+            .onChange(of: searchDate) { date in
+                state.changeQuery { query in
+                    query.date = date
+                    updateFavoriteItem()
+                }
             }
-        }
-        #if os(tvOS)
-        .searchable(text: $state.queryText) {
-            if !state.queryText.isEmpty {
-                ForEach(state.querySuggestions, id: \.self) { suggestion in
-                    Text(suggestion)
-                        .searchCompletion(suggestion)
+            .onChange(of: searchDuration) { duration in
+                state.changeQuery { query in
+                    query.duration = duration
+                    updateFavoriteItem()
+                }
+            }
+            .searchable(text: $state.queryText) {
+                if !state.queryText.isEmpty {
+                    ForEach(state.querySuggestions, id: \.self) { suggestion in
+                        Text(suggestion)
+                            .searchCompletion(suggestion)
+                    }
                 }
             }
         }
-        #else
-                .ignoresSafeArea(.keyboard, edges: .bottom)
-                .navigationTitle("Search")
-        #endif
-        #if os(iOS)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                searchMenu
+
+    #elseif os(macOS)
+        var body: some View {
+            ZStack {
+                results
+                if accounts.app.supportsSearchSuggestions, state.query.query != state.queryText, showSearchSuggestions {
+                    HStack {
+                        Spacer()
+                        SearchSuggestions()
+                            .borderLeading(width: 1, color: Color("ControlsBorderColor"))
+                            .frame(maxWidth: 262)
+                            .opacity(state.queryText.isEmpty ? 0 : 1)
+                    }
+                }
             }
-            ToolbarItem(placement: .principal) {
-                SearchTextField()
+            .environment(\.listingStyle, searchListingStyle)
+            .toolbar {
+                ToolbarItemGroup(placement: toolbarPlacement) {
+                    ListingStyleButtons(listingStyle: $searchListingStyle)
+                    HideWatchedButtons()
+                    HideShortsButtons()
+                    FavoriteButton(item: favoriteItem)
+                        .id(favoriteItem?.id)
+
+                    if accounts.app.supportsSearchFilters {
+                        Section {
+                            HStack {
+                                Text("Sort:")
+                                    .foregroundColor(.secondary)
+                                searchSortOrderPicker
+                            }
+                        }
+                        .transaction { t in t.animation = .none }
+                    }
+
+                    if accounts.app.supportsSearchFilters {
+                        filtersMenu
+                    }
+
+                    if #available(macOS 12, *) {
+                        FocusableSearchTextField()
+                    } else {
+                        SearchTextField()
+                    }
+                }
             }
+            .onAppear {
+                if let query {
+                    state.queryText = query.query
+                    state.resetQuery(query)
+                    updateFavoriteItem()
+                }
+
+                if !videos.isEmpty {
+                    state.store.replace(ContentItem.array(of: videos))
+                }
+            }
+            .onChange(of: accounts.current) { _ in
+                state.reloadQuery()
+            }
+            .onChange(of: state.queryText) { newQuery in
+                if newQuery.isEmpty {
+                    favoriteItem = nil
+                    state.resetQuery()
+                } else {
+                    updateFavoriteItem()
+                }
+                state.loadSuggestions(newQuery)
+            }
+            .onChange(of: searchSortOrder) { order in
+                state.changeQuery { query in
+                    query.sortBy = order
+                    updateFavoriteItem()
+                }
+            }
+            .onChange(of: searchDate) { date in
+                state.changeQuery { query in
+                    query.date = date
+                    updateFavoriteItem()
+                }
+            }
+            .onChange(of: searchDuration) { duration in
+                state.changeQuery { query in
+                    query.duration = duration
+                    updateFavoriteItem()
+                }
+            }
+            .frame(minWidth: Constants.contentViewMinWidth)
+            .navigationTitle("Search")
         }
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-    }
+    #endif
 
     #if os(iOS)
         var searchMenu: some View {
@@ -211,15 +307,19 @@ struct SearchView: View {
                 ListingStyleButtons(listingStyle: $searchListingStyle)
 
                 Section {
+                    HideWatchedButtons()
+                    HideShortsButtons()
+                }
+
+                Section {
                     SettingsButtons()
                 }
             } label: {
                 HStack {
-                    Image(systemName: "magnifyingglass")
                     Image(systemName: "chevron.down.circle.fill")
+                        .foregroundColor(.accentColor)
+                        .imageScale(.large)
                 }
-                .foregroundColor(.accentColor)
-                .imageScale(.medium)
             }
         }
     #endif
@@ -229,27 +329,12 @@ struct SearchView: View {
             if showRecentQueries {
                 recentQueries
             } else {
-                #if os(tvOS)
-                    ScrollView(.vertical, showsIndicators: false) {
-                        HStack(spacing: 0) {
-                            if accounts.app.supportsSearchFilters {
-                                filtersHorizontalStack
-                            }
-
-                            FavoriteButton(item: favoriteItem)
-                                .id(favoriteItem?.id)
-                                .labelStyle(.iconOnly)
-                                .font(.system(size: 25))
-                        }
-
-                        HorizontalCells(items: state.store.collection)
-                            .environment(\.loadMoreContentHandler) { state.loadNextPage() }
+                VerticalCells(items: state.store.collection, allowEmpty: state.query.isEmpty) {
+                    if shouldDisplayHeader {
+                        header
                     }
-                    .edgesIgnoringSafeArea(.horizontal)
-                #else
-                    VerticalCells(items: state.store.collection, allowEmpty: state.query.isEmpty)
-                        .environment(\.loadMoreContentHandler) { state.loadNextPage() }
-                #endif
+                }
+                .environment(\.loadMoreContentHandler) { state.loadNextPage() }
 
                 if noResults {
                     Text("No results")
@@ -268,7 +353,7 @@ struct SearchView: View {
         #if os(iOS)
             accounts.app.supportsSearchFilters || favorites.isEnabled ? .bottomBar : .automatic
         #else
-                .automatic
+            .automatic
         #endif
     }
 
@@ -333,6 +418,7 @@ struct SearchView: View {
         NavigationLink(destination: recentItemNavigationLinkDestination(item)) {
             recentItemLabel(item)
         }
+        .contextMenu { recentItemContextMenu(item) }
     }
 
     @ViewBuilder private func recentItemNavigationLinkDestination(_ item: RecentItem) -> some View {
@@ -393,7 +479,11 @@ struct SearchView: View {
         } label: {
             recentItemLabel(item)
         }
-        .contextMenu {
+        .contextMenu { recentItemContextMenu(item) }
+    }
+
+    private func recentItemContextMenu(_ item: RecentItem) -> some View {
+        Group {
             removeButton(item)
 
             #if os(tvOS)
@@ -553,6 +643,49 @@ struct SearchView: View {
             searchDuration.rawValue,
             searchSortOrder.rawValue
         ))
+    }
+
+    var shouldDisplayHeader: Bool {
+        #if os(tvOS)
+            !state.query.isEmpty
+        #else
+            false
+        #endif
+    }
+
+    var header: some View {
+        HStack {
+            clearButton
+
+            #if os(tvOS)
+                if accounts.app.supportsSearchFilters {
+                    filtersHorizontalStack
+                }
+            #endif
+            FavoriteButton(item: favoriteItem)
+                .id(favoriteItem?.id)
+                .labelStyle(.iconOnly)
+                .font(.system(size: 25))
+
+            Spacer()
+            ListingStyleButtons(listingStyle: $searchListingStyle)
+            HideWatchedButtons()
+            HideShortsButtons()
+        }
+        .labelStyle(.iconOnly)
+        .padding(.leading, 30)
+        .padding(.bottom, 15)
+        .padding(.trailing, 30)
+    }
+
+    var clearButton: some View {
+        Button {
+            state.queryText = ""
+        } label: {
+            Label("Clear", systemImage: "xmark")
+                .labelStyle(.iconOnly)
+        }
+        .font(.caption)
     }
 }
 

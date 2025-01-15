@@ -6,6 +6,7 @@ import SwiftUI
 struct VideoCell: View {
     var id: String?
     private var video: Video
+    private var watch: Watch?
 
     @Environment(\.horizontalCells) private var horizontalCells
     @Environment(\.inChannelView) private var inChannelView
@@ -23,16 +24,15 @@ struct VideoCell: View {
     @Default(.watchedVideoStyle) private var watchedVideoStyle
     @Default(.watchedVideoBadgeColor) private var watchedVideoBadgeColor
     @Default(.watchedVideoPlayNowBehavior) private var watchedVideoPlayNowBehavior
+    @Default(.showChannelAvatarInVideosListing) private var showChannelAvatarInVideosListing
 
     private var navigation: NavigationModel { .shared }
     private var player: PlayerModel { .shared }
 
-    @FetchRequest private var watchRequest: FetchedResults<Watch>
-
-    init(id: String? = nil, video: Video) {
+    init(id: String? = nil, video: Video, watch: Watch? = nil) {
         self.id = id
         self.video = video
-        _watchRequest = video.watchFetchRequest
+        self.watch = watch
     }
 
     var body: some View {
@@ -107,10 +107,6 @@ struct VideoCell: View {
         watchedVideoPlayNowBehavior == .continue
     }
 
-    private var watch: Watch? {
-        watchRequest.first
-    }
-
     private var finished: Bool {
         watch?.finished ?? false
     }
@@ -140,7 +136,7 @@ struct VideoCell: View {
     private var contentOpacity: Double {
         guard saveHistory,
               !watch.isNil,
-              watchedVideoStyle == .decreasedOpacity || watchedVideoStyle == .both
+              watchedVideoStyle.isDecreasingOpacity
         else {
             return 1
         }
@@ -166,17 +162,22 @@ struct VideoCell: View {
 
                     HStack(spacing: Constants.channelDetailsStackSpacing) {
                         if !inChannelView,
-                           let url = video.channel.thumbnailURLOrCached,
+                           showChannelAvatarInVideosListing,
                            video != .fixture
                         {
                             ChannelLinkView(channel: video.channel) {
-                                ThumbnailView(url: url)
-                                    .frame(width: Constants.channelThumbnailSize, height: Constants.channelThumbnailSize)
-                                    .clipShape(Circle())
+                                if showChannelAvatarInVideosListing {
+                                    ChannelAvatarView(channel: video.channel)
+                                        .frame(width: Constants.channelThumbnailSize, height: Constants.channelThumbnailSize)
+                                } else {
+                                    channelLabel(badge: false)
+                                }
                             }
                         }
 
-                        if !channelOnThumbnail, !inChannelView {
+                        if !channelOnThumbnail,
+                           !inChannelView
+                        {
                             ChannelLinkView(channel: video.channel) {
                                 channelLabel(badge: false)
                             }
@@ -269,12 +270,9 @@ struct VideoCell: View {
                         if !channelOnThumbnail, !inChannelView {
                             ChannelLinkView(channel: video.channel) {
                                 HStack(spacing: Constants.channelDetailsStackSpacing) {
-                                    if let url = video.channel.thumbnailURLOrCached,
-                                       video != .fixture
-                                    {
-                                        ThumbnailView(url: url)
+                                    if video != .fixture, showChannelAvatarInVideosListing {
+                                        ChannelAvatarView(channel: video.channel)
                                             .frame(width: Constants.channelThumbnailSize, height: Constants.channelThumbnailSize)
-                                            .clipShape(Circle())
                                     }
 
                                     channelLabel(badge: false)
@@ -296,13 +294,12 @@ struct VideoCell: View {
                 HStack(spacing: 8) {
                     if channelOnThumbnail,
                        !inChannelView,
-                       let url = video.channel.thumbnailURLOrCached,
+                       video.channel.thumbnailURLOrCached != nil,
                        video != .fixture
                     {
                         ChannelLinkView(channel: video.channel) {
-                            ThumbnailView(url: url)
+                            ChannelAvatarView(channel: video.channel)
                                 .frame(width: Constants.channelThumbnailSize, height: Constants.channelThumbnailSize)
-                                .clipShape(Circle())
                         }
                     }
 
@@ -348,7 +345,7 @@ struct VideoCell: View {
             DetailBadge(text: video.author, style: .prominent)
                 .foregroundColor(.primary)
         } else {
-            Text(video.channel.name)
+            Text(verbatim: video.channel.name)
                 .fontWeight(.semibold)
                 .foregroundColor(.secondary)
         }
@@ -357,10 +354,6 @@ struct VideoCell: View {
     private var additionalDetailsAvailable: Bool {
         video.publishedDate != nil || video.views != 0 ||
             (!timeOnThumbnail && !videoDuration.isNil)
-    }
-
-    private var showProgressView: Bool {
-        saveHistory && showWatchingProgress && ((watch?.finished ?? false) || watch?.progress ?? 0 > 0)
     }
 
     private var thumbnail: some View {
@@ -380,7 +373,7 @@ struct VideoCell: View {
                 #else
                 .offset(x: 0, y: -3)
                 #endif
-                .opacity(showProgressView ? 1 : 0)
+                .opacity(watch?.isShowingProgress ?? false ? 1 : 0)
             }
 
             VStack {
@@ -447,7 +440,7 @@ struct VideoCell: View {
             #endif
         }
         .mask(RoundedRectangle(cornerRadius: thumbnailRoundingCornerRadius))
-        .modifier(AspectRatioModifier())
+        .aspectRatio(Constants.aspectRatio16x9, contentMode: .fill)
     }
 
     private var time: String? {
@@ -473,28 +466,10 @@ struct VideoCell: View {
     }
 
     private func videoDetail(_ text: String, lineLimit: Int = 1) -> some View {
-        Text(text)
+        Text(verbatim: text)
             .fontWeight(.bold)
             .lineLimit(lineLimit)
             .truncationMode(.middle)
-    }
-
-    struct AspectRatioModifier: ViewModifier {
-        @Environment(\.horizontalCells) private var horizontalCells
-
-        func body(content: Content) -> some View {
-            Group {
-                if horizontalCells {
-                    content
-                } else {
-                    content
-                        .aspectRatio(
-                            VideoPlayerView.defaultAspectRatio,
-                            contentMode: .fill
-                        )
-                }
-            }
-        }
     }
 }
 
@@ -503,7 +478,15 @@ struct VideoCellThumbnail: View {
     @ObservedObject private var thumbnails = ThumbnailsModel.shared
 
     var body: some View {
-        ThumbnailView(url: thumbnails.best(video))
+        GeometryReader { geometry in
+            let (url, quality) = thumbnails.best(video)
+            let aspectRatio = (quality == .default || quality == .high) ? Constants.aspectRatio4x3 : Constants.aspectRatio16x9
+
+            ThumbnailView(url: url)
+                .aspectRatio(aspectRatio, contentMode: .fill)
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .clipped()
+        }
     }
 }
 

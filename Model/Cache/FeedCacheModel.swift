@@ -5,7 +5,7 @@ import Logging
 import SwiftyJSON
 
 struct FeedCacheModel: CacheModel {
-    static let shared = FeedCacheModel()
+    static let shared = Self()
     let logger = Logger(label: "stream.yattee.cache.feed")
 
     static let diskConfig = DiskConfig(name: "feed")
@@ -14,16 +14,19 @@ struct FeedCacheModel: CacheModel {
     let storage = try? Storage<String, JSON>(
         diskConfig: Self.diskConfig,
         memoryConfig: Self.memoryConfig,
+        fileManager: FileManager.default,
         transformer: BaseCacheModel.jsonTransformer
     )
 
     func storeFeed(account: Account, videos: [Video]) {
-        let date = iso8601DateFormatter.string(from: Date())
-        logger.info("caching feed \(account.feedCacheKey) -- \(date)")
-        let feedTimeObject: JSON = ["date": date]
-        let videosObject: JSON = ["videos": videos.prefix(cacheLimit).map { $0.json.object }]
-        try? storage?.setObject(feedTimeObject, forKey: feedTimeCacheKey(account.feedCacheKey))
-        try? storage?.setObject(videosObject, forKey: account.feedCacheKey)
+        DispatchQueue.global(qos: .background).async {
+            let date = iso8601DateFormatter.string(from: Date())
+            logger.info("caching feed \(account.feedCacheKey) -- \(date)")
+            let feedTimeObject: JSON = ["date": date]
+            let videosObject: JSON = ["videos": videos.prefix(cacheLimit).map(\.json.object)]
+            try? storage?.setObject(feedTimeObject, forKey: feedTimeCacheKey(account.feedCacheKey))
+            try? storage?.setObject(videosObject, forKey: account.feedCacheKey)
+        }
     }
 
     func retrieveFeed(account: Account) -> [Video] {

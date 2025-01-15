@@ -16,7 +16,6 @@ struct AccountForm: View {
     @State private var validationDebounce = Debounce()
 
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.openURL) private var openURL
     @Environment(\.presentationMode) private var presentationMode
 
     var body: some View {
@@ -82,6 +81,10 @@ struct AccountForm: View {
 
     @ViewBuilder var formFields: some View {
         TextField("Username", text: $username)
+        #if !os(macOS)
+            .autocapitalization(.none)
+        #endif
+            .disableAutocorrection(true)
         SecureField("Password", text: $password)
 
         #if os(tvOS)
@@ -95,8 +98,12 @@ struct AccountForm: View {
     }
 
     @ViewBuilder var validationStatus: some View {
-        if !username.isEmpty && !password.isEmpty {
-            Section {
+        Section {
+            if username.isEmpty || password.isEmpty {
+                Text("Enter account credentials to connect...")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .foregroundColor(.secondary)
+            } else {
                 AccountValidationStatus(
                     app: .constant(instance.app),
                     isValid: $isValid,
@@ -146,7 +153,7 @@ struct AccountForm: View {
             return
         }
 
-        let account = AccountsModel.add(instance: instance, name: name, username: username, password: password)
+        let account = AccountsModel.add(instance: instance, id: nil, name: name, username: username, password: password)
         selectedAccount?.wrappedValue = account
 
         presentationMode.wrappedValue.dismiss()

@@ -86,6 +86,7 @@ struct InstanceForm: View {
                 .autocapitalization(.none)
                 .keyboardType(.URL)
             #endif
+                .disableAutocorrection(true)
 
             #if os(tvOS)
                 VStack {
@@ -99,8 +100,12 @@ struct InstanceForm: View {
     }
 
     @ViewBuilder var validationStatus: some View {
-        if !url.isEmpty {
-            Section {
+        Section {
+            if url.isEmpty {
+                Text("Enter location address to connect...")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .foregroundColor(.secondary)
+            } else {
                 AccountValidationStatus(
                     app: $app,
                     isValid: $isValid,

@@ -20,7 +20,7 @@ struct PopularView: View {
     }
 
     var body: some View {
-        VerticalCells(items: videos)
+        VerticalCells(items: videos) { if shouldDisplayHeader { header } }
             .onAppear {
                 resource?.addObserver(store)
                 resource?.loadIfNeeded()?
@@ -69,9 +69,17 @@ struct PopularView: View {
             ToolbarItem {
                 ListingStyleButtons(listingStyle: $popularListingStyle)
             }
+
+            ToolbarItem {
+                HideWatchedButtons()
+            }
+
+            ToolbarItem {
+                HideShortsButtons()
+            }
         }
         #else
-                .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
                     resource?.loadIfNeeded()?
                         .onFailure { self.error = $0 }
                         .onSuccess { _ in self.error = nil }
@@ -83,6 +91,11 @@ struct PopularView: View {
         private var popularMenu: some View {
             Menu {
                 ListingStyleButtons(listingStyle: $popularListingStyle)
+
+                Section {
+                    HideWatchedButtons()
+                    HideShortsButtons()
+                }
 
                 Section {
                     SettingsButtons()
@@ -107,6 +120,37 @@ struct PopularView: View {
             }
         }
     #endif
+
+    var shouldDisplayHeader: Bool {
+        #if os(tvOS)
+            true
+        #else
+            false
+        #endif
+    }
+
+    var header: some View {
+        HStack {
+            Spacer()
+            ListingStyleButtons(listingStyle: $popularListingStyle)
+            HideWatchedButtons()
+            HideShortsButtons()
+
+            Button {
+                resource?.load()
+                    .onFailure { self.error = $0 }
+                    .onSuccess { _ in self.error = nil }
+            } label: {
+                Label("Refresh", systemImage: "arrow.clockwise")
+                    .labelStyle(.iconOnly)
+                    .imageScale(.small)
+                    .font(.caption)
+            }
+        }
+        .padding(.leading, 30)
+        .padding(.bottom, 15)
+        .padding(.trailing, 30)
+    }
 }
 
 struct PopularView_Previews: PreviewProvider {

@@ -4,17 +4,26 @@ import Siesta
 
 struct OpenURLHandler {
     static var firstHandle = true
-    static var shared = OpenURLHandler()
-    static let yatteeProtocol = "yattee://"
-
     var accounts: AccountsModel { .shared }
     var navigation: NavigationModel { .shared }
     var recents: RecentsModel { .shared }
     var player: PlayerModel { .shared }
     var search: SearchModel { .shared }
-    var navigationStyle = NavigationStyle.sidebar
+    var navigationStyle: NavigationStyle
 
     func handle(_ url: URL) {
+        if Self.firstHandle {
+            Self.firstHandle = false
+
+            Delay.by(1) { handle(url) }
+            return
+        }
+
+        if url.isFileURL, url.standardizedFileURL.absoluteString.hasSuffix(".\(ImportExportSettingsModel.settingsExtension)") {
+            navigation.presentSettingsImportSheet(url)
+            return
+        }
+
         if accounts.current.isNil {
             accounts.setCurrent(accounts.any)
         }
@@ -100,7 +109,8 @@ struct OpenURLHandler {
         #endif
 
         let video = Video(app: accounts.current.app!, videoID: id)
-        player.videoBeingOpened = video
+        player.videoBeingOpened = .init(app: accounts.current.app!, videoID: id, title: "Loading video...")
+        player.show()
 
         player
             .playerAPI(video)?
@@ -109,8 +119,9 @@ struct OpenURLHandler {
             .onSuccess { response in
                 if let video: Video = response.typedContent() {
                     let time = parser.time.isNil ? nil : CMTime.secondsInDefaultTimescale(TimeInterval(parser.time!))
-                    self.player.playNow(video, at: time)
-                    self.player.show()
+                    Delay.by(0.5) {
+                        self.player.playNow(video, at: time)
+                    }
                 } else {
                     navigation.presentAlert(title: "Error", message: "This video could not be opened")
                 }
@@ -163,7 +174,9 @@ struct OpenURLHandler {
         resource
             .load()
             .onSuccess { response in
-                if let channel: Channel = response.typedContent() {
+                if let page: ChannelPage = response.typedContent(),
+                   let channel = page.channel
+                {
                     DispatchQueue.main.async {
                         NavigationModel.shared.openChannel(
                             channel,
@@ -196,7 +209,7 @@ struct OpenURLHandler {
             return accounts.api.channelByName(name)
         }
 
-        if let instance = InstancesModel.shared.all.first(where: { $0.app.supportsOpeningChannelsByName }) {
+        if let instance = InstancesModel.shared.all.first(where: \.app.supportsOpeningChannelsByName) {
             return instance.anonymous.channelByName(name)
         }
 
@@ -210,7 +223,7 @@ struct OpenURLHandler {
             return accounts.api.channelByUsername(username)
         }
 
-        if let instance = InstancesModel.shared.all.first(where: { $0.app.supportsOpeningChannelsByName }) {
+        if let instance = InstancesModel.shared.all.first(where: \.app.supportsOpeningChannelsByName) {
             return instance.anonymous.channelByUsername(username)
         }
 

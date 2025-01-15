@@ -3,12 +3,12 @@ import SwiftUI
 
 extension VideoPlayerView {
     var playerDragGesture: some Gesture {
-        DragGesture(minimumDistance: 0, coordinateSpace: .global)
+        DragGesture(minimumDistance: 30, coordinateSpace: .global)
         #if os(iOS)
             .updating($dragGestureOffset) { value, state, _ in
                 guard isVerticalDrag else { return }
                 var translation = value.translation
-                translation.height = max(0, translation.height)
+                translation.height = max(-translation.height, translation.height)
                 state = translation
             }
         #endif
@@ -17,7 +17,9 @@ extension VideoPlayerView {
             }
             .onChanged { value in
                 guard player.presentingPlayer,
-                      !controlsOverlayModel.presenting else { return }
+                      !controlsOverlayModel.presenting,
+                      dragGestureState,
+                      !disableToggleGesture else { return }
 
                 if player.controls.presentingControls, !player.musicMode {
                     player.controls.presentingControls = false
@@ -36,7 +38,12 @@ extension VideoPlayerView {
                     }
                 #endif
 
-                if !isVerticalDrag, horizontalPlayerGestureEnabled, abs(horizontalDrag) > seekGestureSensitivity, !isHorizontalDrag {
+                if !isVerticalDrag,
+                   horizontalPlayerGestureEnabled,
+                   abs(horizontalDrag) > seekGestureSensitivity,
+                   !isHorizontalDrag,
+                   player.activeBackend == .mpv || !avPlayerUsesSystemControls
+                {
                     isHorizontalDrag = true
                     player.seek.onSeekGestureStart()
                     viewDragOffset = 0
@@ -49,29 +56,75 @@ extension VideoPlayerView {
                             player.seek.gestureStart = time
                         }
                         let timeSeek = (time / player.playerSize.width) * horizontalDrag * seekGestureSpeed
-
                         player.seek.gestureSeek = timeSeek
                     }
                     return
                 }
 
-                guard verticalDrag > 0 else { return }
-                viewDragOffset = verticalDrag
-
-                if verticalDrag > 60,
-                   player.playingFullScreen
-                {
-                    player.exitFullScreen(showControls: false)
-                    #if os(iOS)
-                        if Defaults[.rotateToPortraitOnExitFullScreen] {
-                            Orientation.lockOrientation(.allButUpsideDown, andRotateTo: .portrait)
-                        }
-                    #endif
+                // Toggle fullscreen on upward drag only when not disabled
+                if fullscreenPlayerGestureEnabled, verticalDrag < -50 {
+                    player.toggleFullScreenAction()
+                    disableGestureTemporarily()
+                    return
                 }
+
+                // Ignore downward swipes when in fullscreen
+                guard verticalDrag > 0 && !player.playingFullScreen else {
+                    return
+                }
+                viewDragOffset = verticalDrag
             }
             .onEnded { _ in
                 onPlayerDragGestureEnded()
             }
+    }
+
+    var detailsDragGesture: some Gesture {
+        DragGesture(minimumDistance: 30)
+            .onChanged { value in
+                handleDetailsDragChange(value)
+            }
+            .onEnded { value in
+                handleDetailsDragEnd(value)
+            }
+    }
+
+    private func handleDetailsDragChange(_ value: DragGesture.Value) {
+        let maxOffset = -player.playerSize.height
+
+        // Continuous drag update for smooth movement of VideoDetails
+        if fullScreenDetails {
+            // Allow only downward dragging when in fullscreen
+            if value.translation.height > 0 {
+                detailViewDragOffset = min(value.translation.height, abs(maxOffset))
+            }
+        } else {
+            // Allow only upward dragging when not in fullscreen
+            if value.translation.height < 0 {
+                detailViewDragOffset = max(value.translation.height, maxOffset)
+            }
+        }
+    }
+
+    private func handleDetailsDragEnd(_ value: DragGesture.Value) {
+        if value.translation.height < -50, !fullScreenDetails {
+            // Swipe up to enter fullscreen
+            withAnimation(Constants.overlayAnimation) {
+                fullScreenDetails = true
+                detailViewDragOffset = 0
+            }
+        } else if value.translation.height > 50, fullScreenDetails {
+            // Swipe down to exit fullscreen
+            withAnimation(Constants.overlayAnimation) {
+                fullScreenDetails = false
+                detailViewDragOffset = 0
+            }
+        } else {
+            // Reset offset if drag was not significant
+            withAnimation(Constants.overlayAnimation) {
+                detailViewDragOffset = 0
+            }
+        }
     }
 
     func onPlayerDragGestureEnded() {
@@ -99,6 +152,13 @@ extension VideoPlayerView {
             if player.musicMode {
                 player.backend.startControlsUpdates()
             }
+        }
+    }
+
+    private func disableGestureTemporarily() {
+        disableToggleGesture = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            disableToggleGesture = false
         }
     }
 }

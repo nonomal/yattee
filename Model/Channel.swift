@@ -10,6 +10,17 @@ struct Channel: Identifiable, Hashable {
         case livestreams
         case shorts
         case channels
+        case releases
+        case podcasts
+
+        static func from(_ name: String) -> Self? {
+            let rawValueMatch = allCases.first { $0.rawValue == name }
+            guard rawValueMatch.isNil else { return rawValueMatch! }
+
+            if name == "streams" { return .livestreams }
+
+            return nil
+        }
 
         var id: String {
             rawValue
@@ -21,21 +32,6 @@ struct Channel: Identifiable, Hashable {
                 return "Live Streams".localized()
             default:
                 return rawValue.capitalized.localized()
-            }
-        }
-
-        var contentItemType: ContentItem.ContentType {
-            switch self {
-            case .videos:
-                return .video
-            case .playlists:
-                return .playlist
-            case .livestreams:
-                return .video
-            case .shorts:
-                return .video
-            case .channels:
-                return .channel
             }
         }
 
@@ -51,7 +47,15 @@ struct Channel: Identifiable, Hashable {
                 return "1.square"
             case .channels:
                 return "person.3"
+            case .releases:
+                return "square.stack"
+            case .podcasts:
+                return "radio"
             }
+        }
+
+        var alwaysAvailable: Bool {
+            self == .videos || self == .playlists
         }
     }
 
@@ -78,7 +82,9 @@ struct Channel: Identifiable, Hashable {
     var subscriptionsText: String?
 
     var totalViews: Int?
-    var verified: Bool? // swiftlint:disable discouraged_optional_boolean
+    // swiftlint:disable discouraged_optional_boolean
+    var verified: Bool?
+    // swiftlint:enable discouraged_optional_boolean
 
     var videos = [Video]()
     var tabs = [Tab]()
@@ -110,8 +116,7 @@ struct Channel: Identifiable, Hashable {
     }
 
     func hasData(for contentType: ContentType) -> Bool {
-        guard contentType != .videos, contentType != .playlists else { return true }
-        return tabs.contains { $0.contentType == contentType }
+        tabs.contains { $0.contentType == contentType }
     }
 
     var cacheKey: String {
@@ -132,7 +137,7 @@ struct Channel: Identifiable, Hashable {
     }
 
     var thumbnailURLOrCached: URL? {
-        thumbnailURL ?? ChannelsCacheModel.shared.retrieve(cacheKey)?.thumbnailURL
+        thumbnailURL ?? ChannelsCacheModel.shared.retrieve(cacheKey)?.channel?.thumbnailURL
     }
 
     var json: JSON {
@@ -147,7 +152,7 @@ struct Channel: Identifiable, Hashable {
             "subscriptionsText": subscriptionsText as Any,
             "totalViews": totalViews as Any,
             "verified": verified as Any,
-            "videos": videos.map { $0.json.object }
+            "videos": videos.map(\.json.object)
         ]
     }
 

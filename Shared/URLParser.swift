@@ -26,8 +26,7 @@ struct URLParser {
            urlString.contains("youtube.com") ||
            urlString.contains("youtu.be") ||
            urlString.contains("youtube-nocookie.com"),
-           let url = URL(string: "https://\(urlString)"
-           )
+           let url = URL(string: "https://\(urlString)")
         {
             self.url = url
         }
@@ -39,11 +38,16 @@ struct URLParser {
         if hasAnyOfPrefixes(path, ["popular"]) { return .popular }
         if hasAnyOfPrefixes(path, ["trending"]) { return .trending }
 
-        if hasAnyOfPrefixes(path, Self.prefixes[.playlist]!) || queryItemValue("v") == "playlist" {
+        if hasAnyOfPrefixes(path, Self.prefixes[.playlist]!) ||
+            queryItemValue("v") == "playlist" ||
+            (queryItemValue("list") ?? "").count > 3
+        {
             return .playlist
-        } else if hasAnyOfPrefixes(path, Self.prefixes[.channel]!) {
+        }
+        if hasAnyOfPrefixes(path, Self.prefixes[.channel]!) {
             return .channel
-        } else if hasAnyOfPrefixes(path, Self.prefixes[.search]!) {
+        }
+        if hasAnyOfPrefixes(path, Self.prefixes[.search]!) {
             return .search
         }
 
@@ -171,10 +175,8 @@ struct URLParser {
     private func removePrefixes(_ value: String, _ prefixes: [String]) -> String {
         var value = value
 
-        prefixes.forEach { prefix in
-            if value.hasPrefix(prefix) {
-                value.removeFirst(prefix.count)
-            }
+        for prefix in prefixes where value.hasPrefix(prefix) {
+            value.removeFirst(prefix.count)
         }
 
         return value

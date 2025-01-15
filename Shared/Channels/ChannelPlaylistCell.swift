@@ -6,19 +6,29 @@ struct ChannelPlaylistCell: View {
 
     @Environment(\.navigationStyle) private var navigationStyle
 
-    var navigation = NavigationModel.shared
-
     var body: some View {
-        if navigationStyle == .tab {
-            NavigationLink(destination: ChannelPlaylistView(playlist: playlist)) { cell }
-        } else {
-            Button {
-                NavigationModel.shared.openChannelPlaylist(playlist, navigationStyle: navigationStyle)
-            } label: {
-                cell
+        #if os(tvOS)
+            button
+        #else
+            if navigationStyle == .tab {
+                navigationLink
+            } else {
+                button
             }
-            .buttonStyle(.plain)
+        #endif
+    }
+
+    var navigationLink: some View {
+        NavigationLink(destination: ChannelPlaylistView(playlist: playlist)) { cell }
+    }
+
+    var button: some View {
+        Button {
+            NavigationModel.shared.openChannelPlaylist(playlist, navigationStyle: navigationStyle)
+        } label: {
+            cell
         }
+        .buttonStyle(.plain)
     }
 
     var cell: some View {
@@ -43,7 +53,6 @@ struct ChannelPlaylistCell: View {
 
                 Text("\(playlist.videosCount ?? playlist.videos.count) videos")
                     .foregroundColor(.secondary)
-
                     .frame(height: 20)
             }
         }

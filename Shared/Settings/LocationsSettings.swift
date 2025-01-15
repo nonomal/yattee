@@ -50,12 +50,13 @@ struct LocationsSettings: View {
     @ViewBuilder var settings: some View {
         Section(header: SettingsHeader(text: "Locations Manifest".localized())) {
             TextField("URL", text: $instancesManifest)
-            Button("Reload manifest", action: loadCountries)
-                .disabled(instancesManifest.isEmpty)
             #if !os(macOS)
-                .keyboardType(.webSearch)
+                .keyboardType(.URL)
+                .autocapitalization(.none)
             #endif
                 .disableAutocorrection(true)
+            Button("Reload manifest", action: loadCountries)
+                .disabled(instancesManifest.isEmpty)
         }
         .padding(.bottom, 4)
 
@@ -92,6 +93,7 @@ struct LocationsSettings: View {
                 ForEach(instances) { instance in
                     AccountsNavigationLink(instance: instance)
                 }
+                AddPublicInstanceButton()
                 addInstanceButton
             #endif
         }

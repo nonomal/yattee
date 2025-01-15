@@ -39,6 +39,7 @@ final class URLParserTests: XCTestCase {
         "https://www.youtube.com/playlist?list=PLDIoUOhQQPlXr63I_vwF9GD8sAKh77dWU": "PLDIoUOhQQPlXr63I_vwF9GD8sAKh77dWU",
         "https://www.youtube.com/watch?v=playlist&list=PLDIoUOhQQPlXr63I_vwF9GD8sAKh77dWU": "PLDIoUOhQQPlXr63I_vwF9GD8sAKh77dWU",
         "youtube.com/watch?v=playlist&list=PLDIoUOhQQPlXr63I_vwF9GD8sAKh77dWU": "PLDIoUOhQQPlXr63I_vwF9GD8sAKh77dWU",
+        "https://www.youtube.com/watch?v=ZyhrYis509A&list=PL7DA3D097D6FDBC02": "PL7DA3D097D6FDBC02",
         "/watch?v=playlist&list=PLDIoUOhQQPlXr63I_vwF9GD8sAKh77dWU": "PLDIoUOhQQPlXr63I_vwF9GD8sAKh77dWU",
         "watch?v=playlist&list=PLDIoUOhQQPlXr63I_vwF9GD8sAKh77dWU": "PLDIoUOhQQPlXr63I_vwF9GD8sAKh77dWU",
         "playlist?list=ABCDE": "ABCDE"
@@ -56,7 +57,7 @@ final class URLParserTests: XCTestCase {
     ]
 
     func testUrlsParsing() throws {
-        Self.urls.forEach { urlString in
+        for urlString in Self.urls {
             let url = URL(string: urlString)!
             let parser = URLParser(url: url)
             XCTAssertEqual(parser.destination, .fileURL)
@@ -65,7 +66,7 @@ final class URLParserTests: XCTestCase {
     }
 
     func testVideosParsing() throws {
-        Self.videos.forEach { url, id in
+        for (url, id) in Self.videos {
             let parser = URLParser(url: URL(string: url)!)
             XCTAssertEqual(parser.destination, .video)
             XCTAssertEqual(parser.videoID, id)
@@ -73,7 +74,7 @@ final class URLParserTests: XCTestCase {
     }
 
     func testChannelsByNameParsing() throws {
-        Self.channelsByName.forEach { url, name in
+        for (url, name) in Self.channelsByName {
             let parser = URLParser(url: URL(string: url)!)
             XCTAssertEqual(parser.destination, .channel)
             XCTAssertEqual(parser.channelName, name)
@@ -82,7 +83,7 @@ final class URLParserTests: XCTestCase {
     }
 
     func testChannelsByIdParsing() throws {
-        Self.channelsByID.forEach { url, id in
+        for (url, id) in Self.channelsByID {
             let parser = URLParser(url: URL(string: url)!)
             XCTAssertEqual(parser.destination, .channel)
             XCTAssertEqual(parser.channelID, id)
@@ -91,7 +92,7 @@ final class URLParserTests: XCTestCase {
     }
 
     func testUsersParsing() throws {
-        Self.users.forEach { url, user in
+        for (url, user) in Self.users {
             let parser = URLParser(url: URL(string: url)!)
             XCTAssertEqual(parser.destination, .channel)
             XCTAssertNil(parser.channelID)
@@ -101,7 +102,7 @@ final class URLParserTests: XCTestCase {
     }
 
     func testPlaylistsParsing() throws {
-        Self.playlists.forEach { url, id in
+        for (url, id) in Self.playlists {
             let parser = URLParser(url: URL(string: url)!)
             XCTAssertEqual(parser.destination, .playlist)
             XCTAssertEqual(parser.playlistID, id)
@@ -109,7 +110,7 @@ final class URLParserTests: XCTestCase {
     }
 
     func testSearchesParsing() throws {
-        Self.searches.forEach { url, query in
+        for (url, query) in Self.searches {
             let parser = URLParser(url: URL(string: url)!)
             XCTAssertEqual(parser.destination, .search)
             XCTAssertEqual(parser.searchQuery, query)
@@ -126,7 +127,7 @@ final class URLParserTests: XCTestCase {
             "watch?v=IUTGFQpKaPU&t=30s": 30
         ]
 
-        samples.forEach { url, time in
+        for (url, time) in samples {
             XCTAssertEqual(
                 URLParser(url: URL(string: url)!).time,
                 time

@@ -3,15 +3,15 @@ import Foundation
 
 struct QualityProfile: Hashable, Identifiable, Defaults.Serializable {
     static var bridge = QualityProfileBridge()
-    static var defaultProfile = Self(id: "default", backend: .mpv, resolution: .hd720p60, formats: [.stream])
+    static var defaultProfile = Self(id: "default", backend: .mpv, resolution: .hd720p60, formats: [.stream], order: Array(Format.allCases.indices))
 
     enum Format: String, CaseIterable, Identifiable, Defaults.Serializable {
-        case hls
-        case stream
-        case mp4
         case avc1
-        case av1
+        case stream
         case webm
+        case mp4
+        case av1
+        case hls
 
         var id: String {
             rawValue
@@ -23,7 +23,6 @@ struct QualityProfile: Hashable, Identifiable, Defaults.Serializable {
                 return "Stream"
             case .webm:
                 return "WebM"
-
             default:
                 return rawValue.uppercased()
             }
@@ -31,18 +30,18 @@ struct QualityProfile: Hashable, Identifiable, Defaults.Serializable {
 
         var streamFormat: Stream.Format? {
             switch self {
-            case .hls:
-                return nil
-            case .stream:
-                return nil
-            case .mp4:
-                return .mp4
-            case .webm:
-                return .webm
             case .avc1:
                 return .avc1
+            case .stream:
+                return nil
+            case .webm:
+                return .webm
+            case .mp4:
+                return .mp4
             case .av1:
                 return .av1
+            case .hls:
+                return nil
             }
         }
     }
@@ -53,20 +52,23 @@ struct QualityProfile: Hashable, Identifiable, Defaults.Serializable {
     var backend: PlayerBackendType
     var resolution: ResolutionSetting
     var formats: [Format]
-
+    var order: [Int]
     var description: String {
         if let name, !name.isEmpty { return name }
         return "\(backend.label) - \(resolution.description) - \(formatsDescription)"
     }
 
     var formatsDescription: String {
-        if formats.count == Format.allCases.count {
+        switch formats.count {
+        case Format.allCases.count:
             return "Any format".localized()
-        } else if formats.count <= 3 {
+        case 0:
+            return "No format selected".localized()
+        case 1 ... 3:
             return formats.map(\.description).joined(separator: ", ")
+        default:
+            return String(format: "%@ formats".localized(), String(formats.count))
         }
-
-        return String(format: "%@ formats".localized(), String(formats.count))
     }
 
     func isPreferred(_ stream: Stream) -> Bool {
@@ -74,7 +76,8 @@ struct QualityProfile: Hashable, Identifiable, Defaults.Serializable {
             return true
         }
 
-        let resolutionMatch = !stream.resolution.isNil && resolution.value >= stream.resolution
+        let defaultResolution = Stream.Resolution.custom(height: 720, refreshRate: 30)
+        let resolutionMatch = resolution.value ?? defaultResolution >= stream.resolution
 
         if resolutionMatch, formats.contains(.stream), stream.kind == .stream {
             return true
@@ -100,7 +103,8 @@ struct QualityProfileBridge: Defaults.Bridge {
             "name": value.name ?? "",
             "backend": value.backend.rawValue,
             "resolution": value.resolution.rawValue,
-            "formats": value.formats.map { $0.rawValue }.joined(separator: Self.formatsSeparator)
+            "formats": value.formats.map(\.rawValue).joined(separator: Self.formatsSeparator),
+            "order": value.order.map { String($0) }.joined(separator: Self.formatsSeparator) // New line
         ]
     }
 
@@ -115,7 +119,8 @@ struct QualityProfileBridge: Defaults.Bridge {
 
         let name = object["name"]
         let formats = (object["formats"] ?? "").components(separatedBy: Self.formatsSeparator).compactMap { QualityProfile.Format(rawValue: $0) }
+        let order = (object["order"] ?? "").components(separatedBy: Self.formatsSeparator).compactMap { Int($0) }
 
-        return .init(id: id, name: name, backend: backend, resolution: resolution, formats: formats)
+        return .init(id: id, name: name, backend: backend, resolution: resolution, formats: formats, order: order)
     }
 }

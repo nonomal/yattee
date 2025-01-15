@@ -7,9 +7,6 @@ struct AddToPlaylistView: View {
 
     @State private var selectedPlaylistID: Playlist.ID = ""
 
-    @State private var error = ""
-    @State private var presentingErrorAlert = false
-
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.presentationMode) private var presentationMode
 
@@ -51,7 +48,7 @@ struct AddToPlaylistView: View {
         #if os(tvOS)
             600
         #else
-                .infinity
+            .infinity
         #endif
     }
 

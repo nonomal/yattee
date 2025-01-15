@@ -6,7 +6,7 @@ struct InspectorView: View {
     @ObservedObject private var player = PlayerModel.shared
 
     var body: some View {
-        ScrollView {
+        Section(header: header) {
             VStack(alignment: .leading, spacing: 12) {
                 if let video {
                     VStack(spacing: 4) {
@@ -15,7 +15,7 @@ struct InspectorView: View {
 
                             videoDetailRow("Format", value: player.mpvBackend.videoFormat)
                             videoDetailRow("Codec", value: player.mpvBackend.videoCodec)
-                            videoDetailRow("Hardware Decoder", value: player.mpvBackend.hwDecoder)
+                            videoDetailRow("Hardware decoder", value: player.mpvBackend.hwDecoder)
                             videoDetailRow("Driver", value: player.mpvBackend.currentVo)
                             videoDetailRow("Size", value: player.formattedSize)
                             videoDetailRow("FPS", value: player.mpvBackend.formattedOutputFps)
@@ -53,10 +53,14 @@ struct InspectorView: View {
                     NoCommentsView(text: "Not playing", systemImage: "stop.circle.fill")
                 }
             }
-            .padding(.top, 60)
-            .padding(.bottom, 50)
         }
-        .padding(.horizontal)
+    }
+
+    var header: some View {
+        Text("Inspector".localized())
+            .font(.caption)
+            .foregroundColor(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder func videoDetailGroupHeading(_ heading: String, image systemName: String? = nil) -> some View {

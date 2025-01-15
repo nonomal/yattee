@@ -1,10 +1,13 @@
 import CoreMedia
 import Defaults
 import Foundation
+import Libmpv
 import Logging
 #if !os(macOS)
     import Siesta
     import UIKit
+#else
+    import AppKit
 #endif
 
 final class MPVClient: ObservableObject {
@@ -13,6 +16,8 @@ final class MPVClient: ObservableObject {
     }
 
     private var logger = Logger(label: "mpv-client")
+    private var needsDrawingCooldown = false
+    private var needsDrawingWorkItem: DispatchWorkItem?
 
     var mpv: OpaquePointer!
     var mpvGL: OpaquePointer!
@@ -26,6 +31,7 @@ final class MPVClient: ObservableObject {
     var backend: MPVBackend!
 
     var seeking = false
+    var currentRefreshRate = 60
 
     func create(frame: CGRect? = nil) {
         #if !os(macOS)
@@ -36,7 +42,7 @@ final class MPVClient: ObservableObject {
 
         mpv = mpv_create()
         if mpv == nil {
-            print("failed creating context\n")
+            logger.critical("failed creating context\n")
             exit(1)
         }
 
@@ -59,24 +65,81 @@ final class MPVClient: ObservableObject {
             checkError(mpv_set_option_string(mpv, "input-media-keys", "yes"))
         #endif
 
-        checkError(mpv_set_option_string(mpv, "cache-pause-initial", "yes"))
+        // CACHING //
+
+        checkError(mpv_set_option_string(mpv, "cache-pause-initial", Defaults[.mpvCachePauseInital] ? "yes" : "no"))
         checkError(mpv_set_option_string(mpv, "cache-secs", Defaults[.mpvCacheSecs]))
         checkError(mpv_set_option_string(mpv, "cache-pause-wait", Defaults[.mpvCachePauseWait]))
+
+        // PLAYBACK //
         checkError(mpv_set_option_string(mpv, "keep-open", "yes"))
-        checkError(mpv_set_option_string(mpv, "hwdec", machine == "x86_64" ? "no" : "auto-safe"))
+        checkError(mpv_set_option_string(mpv, "deinterlace", Defaults[.mpvDeinterlace] ? "yes" : "no"))
+        checkError(mpv_set_option_string(mpv, "sub-scale", Defaults[.captionsFontScaleSize]))
+        checkError(mpv_set_option_string(mpv, "sub-color", Defaults[.captionsFontColor]))
+        checkError(mpv_set_option_string(mpv, "user-agent", UserAgentManager.shared.userAgent))
+        checkError(mpv_set_option_string(mpv, "initial-audio-sync", Defaults[.mpvInitialAudioSync] ? "yes" : "no"))
+
+        // Enable VSYNC – needed for `video-sync`
+        if Defaults[.mpvSetRefreshToContentFPS] {
+            checkError(mpv_set_option_string(mpv, "opengl-swapinterval", "1"))
+            checkError(mpv_set_option_string(mpv, "video-sync", "display-resample"))
+            checkError(mpv_set_option_string(mpv, "interpolation", "yes"))
+            checkError(mpv_set_option_string(mpv, "tscale", "mitchell"))
+            checkError(mpv_set_option_string(mpv, "tscale-window", "blackman"))
+            checkError(mpv_set_option_string(mpv, "vd-lavc-framedrop", "nonref"))
+            checkError(mpv_set_option_string(mpv, "display-fps-override", "\(String(getScreenRefreshRate()))"))
+        }
+
+        // CPU //
+
+        // Determine number of threads based on system core count
+        let numberOfCores = ProcessInfo.processInfo.processorCount
+        let threads = numberOfCores * 2
+
+        // Log the number of cores and threads
+        logger.info("Number of CPU cores: \(numberOfCores)")
+
+        // Set the number of threads dynamically
+        checkError(mpv_set_option_string(mpv, "vd-lavc-threads", "\(threads)"))
+
+        // GPU //
+
+        checkError(mpv_set_option_string(mpv, "hwdec", Defaults[.mpvHWdec]))
         checkError(mpv_set_option_string(mpv, "vo", "libmpv"))
+
+        // We set set everything to OpenGL so MPV doesn't have to probe for other APIs.
+        checkError(mpv_set_option_string(mpv, "gpu-api", "opengl"))
+
+        #if !os(macOS)
+            checkError(mpv_set_option_string(mpv, "opengl-es", "yes"))
+        #endif
+
+        // We set this to ordered since we use OpenGL and Apple's implementation is ancient.
+        checkError(mpv_set_option_string(mpv, "dither", "ordered"))
+
+        // DEMUXER //
+
+        // We request to test for lavf first and skip probing other demuxer.
+        checkError(mpv_set_option_string(mpv, "demuxer", "lavf"))
+        checkError(mpv_set_option_string(mpv, "audio-demuxer", "lavf"))
+        checkError(mpv_set_option_string(mpv, "sub-demuxer", "lavf"))
         checkError(mpv_set_option_string(mpv, "demuxer-lavf-analyzeduration", "1"))
+        checkError(mpv_set_option_string(mpv, "demuxer-lavf-probe-info", Defaults[.mpvDemuxerLavfProbeInfo]))
+
+        // Disable ytdl, since it causes crashes on macOS.
+        #if os(macOS)
+            checkError(mpv_set_option_string(mpv, "ytdl", "no"))
+        #endif
 
         checkError(mpv_initialize(mpv))
 
         let api = UnsafeMutableRawPointer(mutating: (MPV_RENDER_API_TYPE_OPENGL as NSString).utf8String)
         var initParams = mpv_opengl_init_params(
             get_proc_address: getProcAddress,
-            get_proc_address_ctx: nil,
-            extra_exts: nil
+            get_proc_address_ctx: nil
         )
 
-        queue = DispatchQueue(label: "mpv")
+        queue = DispatchQueue(label: "mpv", qos: .userInteractive, attributes: [.concurrent])
 
         withUnsafeMutablePointer(to: &initParams) { initParams in
             var params = [
@@ -86,7 +149,7 @@ final class MPVClient: ObservableObject {
             ]
 
             if mpv_render_context_create(&mpvGL, mpv, &params) < 0 {
-                puts("failed to initialize mpv GL context")
+                logger.critical("failed to initialize mpv GL context")
                 exit(1)
             }
 
@@ -107,9 +170,9 @@ final class MPVClient: ObservableObject {
             #endif
         }
 
-        queue!.async {
-            mpv_set_wakeup_callback(self.mpv, wakeUp, UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque()))
-        }
+        mpv_set_wakeup_callback(mpv, wakeUp, UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque()))
+        mpv_observe_property(mpv, 0, "pause", MPV_FORMAT_FLAG)
+        mpv_observe_property(mpv, 0, "core-idle", MPV_FORMAT_FLAG)
     }
 
     func readEvents() {
@@ -127,6 +190,8 @@ final class MPVClient: ObservableObject {
     func loadFile(
         _ url: URL,
         audio: URL? = nil,
+        bitrate: Int? = nil,
+        kind: Stream.Kind,
         sub: URL? = nil,
         time: CMTime? = nil,
         forceSeekable: Bool = false,
@@ -136,6 +201,10 @@ final class MPVClient: ObservableObject {
         var options = [String]()
 
         args.append("replace")
+
+        // needed since mpvkit 0.38.0
+        // https://github.com/mpv-player/mpv/issues/13806#issuecomment-2029818905
+        args.append("-1")
 
         if let time, time.seconds > 0 {
             options.append("start=\(Int(time.seconds))")
@@ -157,6 +226,10 @@ final class MPVClient: ObservableObject {
 
         if !options.isEmpty {
             args.append(options.joined(separator: ","))
+        }
+
+        if kind == .hls, bitrate != 0 {
+            checkError(mpv_set_option_string(mpv, "hls-bitrate", String(describing: bitrate)))
         }
 
         command("loadfile", args: args, returnValueCallback: completionHandler)
@@ -272,6 +345,31 @@ final class MPVClient: ObservableObject {
         mpv.isNil ? false : getFlag("eof-reached")
     }
 
+    var currentContainerFps: Int {
+        guard !mpv.isNil else { return 30 }
+        let fps = getDouble("container-fps")
+        return Int(fps.rounded())
+    }
+
+    func areSubtitlesAdded() async -> Bool {
+        guard !mpv.isNil else { return false }
+
+        let trackCount = await Task(operation: { getInt("track-list/count") }).value
+        guard trackCount > 0 else { return false }
+
+        for index in 0 ..< trackCount {
+            if let trackType = await Task(operation: { getString("track-list/\(index)/type") }).value, trackType == "sub" {
+                return true
+            }
+        }
+        return false
+    }
+
+    func logCurrentFps() {
+        let fps = currentContainerFps
+        logger.info("Current container FPS: \(fps)")
+    }
+
     func seek(relative time: CMTime, completionHandler: ((Bool) -> Void)? = nil) {
         guard !seeking else {
             logger.warning("ignoring seek, another in progress")
@@ -315,17 +413,17 @@ final class MPVClient: ObservableObject {
                 return
             }
 
-            DispatchQueue.main.async { [weak self] in
+            DispatchQueue.main.async(qos: .userInteractive) { [weak self] in
                 guard let self else { return }
                 let model = self.backend.model
+                let aspectRatio = self.aspectRatio > 0 && self.aspectRatio < VideoPlayerView.defaultAspectRatio ? self.aspectRatio : VideoPlayerView.defaultAspectRatio
+                let height = [model.playerSize.height, model.playerSize.width / aspectRatio].min()!
+                var insets = 0.0
+                #if os(iOS)
+                    insets = OrientationTracker.shared.currentInterfaceOrientation.isPortrait ? SafeAreaModel.shared.safeArea.bottom : 0
+                #endif
+                let offsetY = max(0, model.playingFullScreen ? ((model.playerSize.height / 2.0) - ((height + insets) / 2)) : 0)
                 UIView.animate(withDuration: 0.2, animations: {
-                    let aspectRatio = self.aspectRatio > 0 && self.aspectRatio < VideoPlayerView.defaultAspectRatio ? self.aspectRatio : VideoPlayerView.defaultAspectRatio
-                    let height = [model.playerSize.height, model.playerSize.width / aspectRatio].min()!
-                    var insets = 0.0
-                    #if os(iOS)
-                        insets = OrientationTracker.shared.currentInterfaceOrientation.isPortrait ? SafeArea.insets.bottom : 0
-                    #endif
-                    let offsetY = model.playingFullScreen ? ((model.playerSize.height / 2.0) - ((height + insets) / 2)) : 0
                     self.glView?.frame = CGRect(x: 0, y: offsetY, width: roundedWidth, height: height)
                 }) { completion in
                     if completion {
@@ -343,10 +441,30 @@ final class MPVClient: ObservableObject {
     }
 
     func setNeedsDrawing(_ needsDrawing: Bool) {
+        // Check if we are currently in a cooldown period
+        guard !needsDrawingCooldown else {
+            logger.info("Not drawing, cooldown in progress")
+            return
+        }
+
         logger.info("needs drawing: \(needsDrawing)")
+
+        // Set the cooldown flag to true and cancel any existing work item
+        needsDrawingCooldown = true
+        needsDrawingWorkItem?.cancel()
+
         #if !os(macOS)
             glView?.needsDrawing = needsDrawing
         #endif
+
+        // Create a new DispatchWorkItem to reset the cooldown flag after 0.1 seconds
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.needsDrawingCooldown = false
+        }
+        needsDrawingWorkItem = workItem
+
+        // Schedule the cooldown reset after 0.1 seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: workItem)
     }
 
     func command(
@@ -374,16 +492,59 @@ final class MPVClient: ObservableObject {
         }
     }
 
+    func updateRefreshRate(to refreshRate: Int) {
+        setString("display-fps-override", "\(String(refreshRate))")
+        logger.info("Updated refresh rate during playback to: \(refreshRate) Hz")
+    }
+
+    // Retrieve the screen's current refresh rate dynamically.
+    func getScreenRefreshRate() -> Int {
+        var refreshRate = 60 // Default to 60 Hz in case of failure
+
+        #if os(macOS)
+            // macOS implementation using NSScreen
+            if let screen = NSScreen.main,
+               let displayID = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID,
+               let mode = CGDisplayCopyDisplayMode(displayID),
+               mode.refreshRate > 0
+            {
+                refreshRate = Int(mode.refreshRate)
+                logger.info("Screen refresh rate: \(refreshRate) Hz")
+            } else {
+                logger.warning("Failed to get refresh rate from NSScreen.")
+            }
+        #else
+            // iOS implementation using UIScreen with a failover
+            let mainScreen = UIScreen.main
+            refreshRate = mainScreen.maximumFramesPerSecond
+
+            // Failover: if maximumFramesPerSecond is 0 or an unexpected value
+            if refreshRate <= 0 {
+                refreshRate = 60 // Fallback to 60 Hz
+                logger.warning("Failed to get refresh rate from UIScreen, falling back to 60 Hz.")
+            } else {
+                logger.info("Screen refresh rate: \(refreshRate) Hz")
+            }
+        #endif
+
+        currentRefreshRate = refreshRate
+        return refreshRate
+    }
+
     func addVideoTrack(_ url: URL) {
         command("video-add", args: [url.absoluteString])
     }
 
-    func addSubTrack(_ url: URL) {
-        command("sub-add", args: [url.absoluteString])
+    func addSubTrack(_ url: URL) async {
+        await Task {
+            command("sub-add", args: [url.absoluteString])
+        }.value
     }
 
-    func removeSubs() {
-        command("sub-remove")
+    func removeSubs() async {
+        await Task {
+            command("sub-remove")
+        }.value
     }
 
     func setVideoToAuto() {
@@ -392,6 +553,22 @@ final class MPVClient: ObservableObject {
 
     func setVideoToNo() {
         setString("video", "no")
+    }
+
+    func setSubToAuto() {
+        setString("sub", "auto")
+    }
+
+    func setSubToNo() {
+        setString("sub", "no")
+    }
+
+    func setSubFontSize(scaleSize: String) {
+        setString("sub-scale", scaleSize)
+    }
+
+    func setSubFontColor(color: String) {
+        setString("sub-color", color)
     }
 
     var tracksCount: Int {
@@ -431,6 +608,7 @@ final class MPVClient: ObservableObject {
     }
 
     func getString(_ name: String) -> String? {
+        guard mpv != nil else { return nil }
         let cstr = mpv_get_property_string(mpv, name)
         let str: String? = cstr == nil ? nil : String(cString: cstr!)
         mpv_free(cstr)
@@ -471,9 +649,8 @@ final class MPVClient: ObservableObject {
             let data = Data(bufPtr)
             if let lastIndex = data.lastIndex(where: { $0 != 0 }) {
                 return String(data: data[0 ... lastIndex], encoding: .isoLatin1)!
-            } else {
-                return String(data: data, encoding: .isoLatin1)!
             }
+            return String(data: data, encoding: .isoLatin1)!
         }
     }
 }

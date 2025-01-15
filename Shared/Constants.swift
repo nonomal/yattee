@@ -2,9 +2,75 @@ import Defaults
 import Foundation
 import SwiftUI
 
-struct Constants {
-    static let yatteeProtocol = "yattee://"
+enum Constants {
     static let overlayAnimation = Animation.linear(duration: 0.2)
+    static let aspectRatio16x9 = 16.0 / 9.0
+    static let aspectRatio4x3 = 4.0 / 3.0
+
+    static var isAppleTV: Bool {
+        #if os(iOS)
+            UIDevice.current.userInterfaceIdiom == .tv
+        #else
+            false
+        #endif
+    }
+
+    static var isMac: Bool {
+        #if os(iOS)
+            UIDevice.current.userInterfaceIdiom == .mac
+        #else
+            false
+        #endif
+    }
+
+    static var isIPhone: Bool {
+        #if os(iOS)
+            UIDevice.current.userInterfaceIdiom == .phone
+        #else
+            false
+        #endif
+    }
+
+    static var isIPad: Bool {
+        #if os(iOS)
+            UIDevice.current.userInterfaceIdiom == .pad
+        #else
+            false
+        #endif
+    }
+
+    static var isTvOS: Bool {
+        #if os(tvOS)
+            true
+        #else
+            false
+        #endif
+    }
+
+    static var isMacOS: Bool {
+        #if os(macOS)
+            true
+        #else
+            false
+        #endif
+    }
+
+    static var isIOS: Bool {
+        #if os(iOS)
+            true
+        #else
+            false
+        #endif
+    }
+
+    static var detailsVisibility: Bool {
+        #if os(iOS)
+            false
+        #else
+            true
+        #endif
+    }
+
     static var progressViewScale: Double {
         #if os(macOS)
             0.4
@@ -37,20 +103,45 @@ struct Constants {
         #endif
     }
 
-    static var detailsVisibility: Bool {
-        #if os(iOS)
-            false
+    static var contentViewMinWidth: Double {
+        #if os(macOS)
+            835
         #else
-            true
+            0
         #endif
     }
 
-    static var nextSystemImage: String {
-        if #available(iOS 16, macOS 13, tvOS 16, *) {
-            return "film.stack"
-        } else {
-            return "list.and.film"
-        }
+    static var deviceName: String {
+        #if os(macOS)
+            Host().localizedName ?? "Mac"
+        #else
+            UIDevice.current.name
+        #endif
+    }
+
+    static var platform: String {
+        #if os(macOS)
+            "macOS"
+        #elseif os(iOS)
+            "iOS"
+        #elseif os(tvOS)
+            "tvOS"
+        #else
+            "unknown"
+        #endif
+    }
+
+    static var defaultNavigationStyle: NavigationStyle {
+        #if os(macOS)
+            return .sidebar
+        #elseif os(iOS)
+            if isIPad {
+                return .sidebar
+            }
+            return .tab
+        #else
+            return .tab
+        #endif
     }
 
     static func seekIcon(_ type: String, _ interval: TimeInterval) -> String {

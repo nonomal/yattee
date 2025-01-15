@@ -10,12 +10,13 @@ struct ListingStyleButtons: View {
             Button {
                 listingStyle = listingStyle.next()
             } label: {
-                Label(listingStyle.rawValue.capitalized, systemImage: listingStyle.systemImage)
+                Label(listingStyle.rawValue.capitalized.localized(), systemImage: listingStyle.systemImage)
                 #if os(tvOS)
-                    .font(.caption2)
+                    .font(.caption)
                     .imageScale(.small)
                 #endif
             }
+            .help(listingStyle == .cells ? "List" : "Cells")
         #endif
     }
 
@@ -25,7 +26,7 @@ struct ListingStyleButtons: View {
                 Button {
                     listingStyle = style
                 } label: {
-                    Label(style.rawValue.capitalized, systemImage: style.systemImage)
+                    Label(style.rawValue.capitalized.localized(), systemImage: style.systemImage)
                 }
             }
         }

@@ -1,4 +1,4 @@
-import AVFoundation
+import AVKit
 import Defaults
 import Foundation
 import Logging
@@ -6,6 +6,7 @@ import MediaPlayer
 #if !os(macOS)
     import UIKit
 #endif
+import SwiftUI
 
 final class AVPlayerBackend: PlayerBackend {
     static let assetKeysToLoad = ["tracks", "playable", "duration"]
@@ -37,8 +38,11 @@ final class AVPlayerBackend: PlayerBackend {
         !avPlayer.currentItem.isNil
     }
 
-    var isLoadingVideo: Bool {
-        model.currentItem == nil || model.time == nil || !model.time!.isValid
+    var isLoadingVideo = false
+
+    var hasStarted = false
+    var isPaused: Bool {
+        avPlayer.timeControlStatus == .paused
     }
 
     var isPlaying: Bool {
@@ -84,6 +88,10 @@ final class AVPlayerBackend: PlayerBackend {
     private(set) var playerLayer = AVPlayerLayer()
     #if os(tvOS)
         var controller: AppleAVPlayerViewController?
+    #elseif os(iOS)
+        var controller = AVPlayerViewController() { didSet {
+            controller.player = avPlayer
+        }}
     #endif
     var startPictureInPictureOnPlay = false
     var startPictureInPictureOnSwitch = false
@@ -94,13 +102,13 @@ final class AVPlayerBackend: PlayerBackend {
 
     private var frequentTimeObserver: Any?
     private var infrequentTimeObserver: Any?
-    private var playerTimeControlStatusObserver: Any?
+    private var playerTimeControlStatusObserver: NSKeyValueObservation?
 
     private var statusObservation: NSKeyValueObservation?
 
     private var timeObserverThrottle = Throttle(interval: 2)
 
-    internal var controlsUpdates = false
+    var controlsUpdates = false
 
     init() {
         addFrequentTimeObserver()
@@ -108,28 +116,43 @@ final class AVPlayerBackend: PlayerBackend {
         addPlayerTimeControlStatusObserver()
 
         playerLayer.player = avPlayer
+        #if os(iOS)
+            controller.player = avPlayer
+        #endif
+        logger.info("AVPlayerBackend initialized.")
     }
 
-    func bestPlayable(_ streams: [Stream], maxResolution: ResolutionSetting) -> Stream? {
-        let sortedByResolution = streams
-            .filter { ($0.kind == .adaptive || $0.kind == .stream) && $0.resolution <= maxResolution.value }
-            .sorted { $0.resolution > $1.resolution }
+    deinit {
+        // Invalidate any observers to avoid memory leaks
+        statusObservation?.invalidate()
+        playerTimeControlStatusObserver?.invalidate()
 
-        return streams.first { $0.kind == .hls } ??
-            sortedByResolution.first { $0.kind == .stream } ??
-            sortedByResolution.first
+        // Remove any time observers added to AVPlayer
+        if let frequentObserver = frequentTimeObserver {
+            avPlayer.removeTimeObserver(frequentObserver)
+        }
+        if let infrequentObserver = infrequentTimeObserver {
+            avPlayer.removeTimeObserver(infrequentObserver)
+        }
+
+        // Remove notification observers
+        removeItemDidPlayToEndTimeObserver()
+
+        logger.info("AVPlayerBackend deinitialized.")
     }
 
     func canPlay(_ stream: Stream) -> Bool {
-        stream.kind == .hls || stream.kind == .stream || (stream.kind == .adaptive && stream.format == .mp4)
+        stream.kind == .hls || stream.kind == .stream
     }
 
     func playStream(
         _ stream: Stream,
         of video: Video,
         preservingTime: Bool,
-        upgrading _: Bool
+        upgrading: Bool
     ) {
+        isLoadingVideo = true
+
         if let url = stream.singleAssetURL {
             model.logger.info("playing stream with one asset\(stream.kind == .hls ? " (HLS)" : ""): \(url)")
 
@@ -137,7 +160,7 @@ final class AVPlayerBackend: PlayerBackend {
                 _ = url.startAccessingSecurityScopedResource()
             }
 
-            loadSingleAsset(url, stream: stream, of: video, preservingTime: preservingTime)
+            loadSingleAsset(url, stream: stream, of: video, preservingTime: preservingTime, upgrading: upgrading)
         } else {
             model.logger.info("playing stream with many assets:")
             model.logger.info("composition audio asset: \(stream.audioAsset.url)")
@@ -152,7 +175,22 @@ final class AVPlayerBackend: PlayerBackend {
             return
         }
 
+        // After the video has ended, hitting play restarts the video from the beginning.
+        if currentTime?.seconds.formattedAsPlaybackTime() == model.playerTime.duration.seconds.formattedAsPlaybackTime() &&
+            currentTime!.seconds > 0 && model.playerTime.duration.seconds > 0
+        {
+            seek(to: 0, seekType: .loopRestart)
+        }
+        #if !os(macOS)
+            model.setAudioSessionActive(true)
+        #endif
         avPlayer.play()
+
+        // Setting hasStarted to true the first time player started
+        if !hasStarted {
+            hasStarted = true
+        }
+
         model.objectWillChange.send()
     }
 
@@ -160,17 +198,27 @@ final class AVPlayerBackend: PlayerBackend {
         guard avPlayer.timeControlStatus != .paused else {
             return
         }
-
+        #if !os(macOS)
+            model.setAudioSessionActive(false)
+        #endif
         avPlayer.pause()
         model.objectWillChange.send()
     }
 
     func togglePlay() {
-        isPlaying ? pause() : play()
+        if isPlaying {
+            pause()
+        } else {
+            play()
+        }
     }
 
     func stop() {
+        #if !os(macOS)
+            model.setAudioSessionActive(false)
+        #endif
         avPlayer.replaceCurrentItem(with: nil)
+        hasStarted = false
     }
 
     func cancelLoads() {
@@ -207,16 +255,20 @@ final class AVPlayerBackend: PlayerBackend {
         _ url: URL,
         stream: Stream,
         of video: Video,
-        preservingTime: Bool = false
+        preservingTime: Bool = false,
+        upgrading: Bool = false
     ) {
         asset?.cancelLoading()
-        asset = AVURLAsset(url: url)
+        asset = AVURLAsset(
+            url: url,
+            options: ["AVURLAssetHTTPHeaderFieldsKey": ["User-Agent": "\(UserAgentManager.shared.userAgent)"]]
+        )
         asset?.loadValuesAsynchronously(forKeys: Self.assetKeysToLoad) { [weak self] in
             var error: NSError?
             switch self?.asset?.statusOfValue(forKey: "duration", error: &error) {
             case .loaded:
                 DispatchQueue.main.async { [weak self] in
-                    self?.insertPlayerItem(stream, for: video, preservingTime: preservingTime)
+                    self?.insertPlayerItem(stream, for: video, preservingTime: preservingTime, upgrading: upgrading)
                 }
             case .failed:
                 DispatchQueue.main.async { [weak self] in
@@ -291,11 +343,17 @@ final class AVPlayerBackend: PlayerBackend {
     private func insertPlayerItem(
         _ stream: Stream,
         for video: Video,
-        preservingTime: Bool = false
+        preservingTime: Bool = false,
+        upgrading: Bool = false
     ) {
         removeItemDidPlayToEndTimeObserver()
 
         model.playerItem = playerItem(stream)
+
+        if stream.isHLS {
+            model.playerItem?.preferredPeakBitRate = Double(model.qualityProfile?.resolution.value.bitrate ?? 0)
+        }
+
         guard model.playerItem != nil else {
             return
         }
@@ -313,7 +371,7 @@ final class AVPlayerBackend: PlayerBackend {
 
         let startPlaying = {
             #if !os(macOS)
-                try? AVAudioSession.sharedInstance().setActive(true)
+                self.model.setAudioSessionActive(true)
             #endif
 
             self.setRate(self.model.currentRate)
@@ -323,6 +381,10 @@ final class AVPlayerBackend: PlayerBackend {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
                 guard let self else {
                     return
+                }
+
+                if self.model.musicMode {
+                    self.startMusicMode()
                 }
 
                 if !preservingTime,
@@ -341,9 +403,11 @@ final class AVPlayerBackend: PlayerBackend {
                         }
 
                         self.model.lastSkipped = segment
+                        self.model.handleOnPlayStream(stream)
                         self.model.play()
                     }
                 } else {
+                    self.model.handleOnPlayStream(stream)
                     self.model.play()
                 }
             }
@@ -369,7 +433,7 @@ final class AVPlayerBackend: PlayerBackend {
         }
 
         if preservingTime {
-            if model.preservedTime.isNil {
+            if model.preservedTime.isNil || upgrading {
                 model.saveTime {
                     replaceItemAndSeek()
                     startPlaying()
@@ -400,9 +464,8 @@ final class AVPlayerBackend: PlayerBackend {
     private func playerItem(_: Stream) -> AVPlayerItem? {
         if let asset {
             return AVPlayerItem(asset: asset)
-        } else {
-            return AVPlayerItem(asset: composition)
         }
+        return AVPlayerItem(asset: composition)
     }
 
     private func attachMetadata() {
@@ -467,16 +530,16 @@ final class AVPlayerBackend: PlayerBackend {
                 return
             }
 
+            self.isLoadingVideo = false
+
             switch playerItem.status {
             case .readyToPlay:
-                if self.model.playingInPictureInPicture {
-                    self.startPictureInPictureOnSwitch = false
-                    self.startPictureInPictureOnPlay = false
-                }
                 if self.model.activeBackend == .appleAVPlayer,
                    self.isAutoplaying(playerItem)
                 {
-                    self.model.updateAspectRatio()
+                    if self.model.aspectRatio != self.aspectRatio {
+                        self.model.updateAspectRatio()
+                    }
 
                     if self.startPictureInPictureOnPlay,
                        let controller = self.model.pipController,
@@ -487,21 +550,26 @@ final class AVPlayerBackend: PlayerBackend {
                         self.model.play()
                     }
                 } else if self.startPictureInPictureOnPlay {
-                    self.startPictureInPictureOnPlay = false
                     self.model.stream = self.stream
                     self.model.streamSelection = self.stream
 
                     if self.model.activeBackend != .appleAVPlayer {
                         self.startPictureInPictureOnSwitch = true
                         let seconds = self.model.mpvBackend.currentTime?.seconds ?? 0
-                        self.seek(to: seconds, seekType: .backendSync) { _ in
+                        self.seek(to: seconds, seekType: .backendSync) { finished in
+                            guard finished else { return }
                             DispatchQueue.main.async {
                                 self.model.pause()
                                 self.model.changeActiveBackend(from: .mpv, to: .appleAVPlayer, changingStream: false)
+
+                                Delay.by(3) {
+                                    self.startPictureInPictureOnPlay = false
+                                }
                             }
                         }
                     }
                 }
+
             case .failed:
                 DispatchQueue.main.async {
                     self.model.playerError = item.error
@@ -575,6 +643,8 @@ final class AVPlayerBackend: PlayerBackend {
             if self.controlsUpdates {
                 self.updateControls()
             }
+
+            self.model.updateTime(self.currentTime!)
         }
     }
 
@@ -594,7 +664,7 @@ final class AVPlayerBackend: PlayerBackend {
             }
 
             self.timeObserverThrottle.execute {
-                self.model.updateWatch()
+                self.model.updateWatch(time: self.currentTime)
             }
         }
     }
@@ -624,8 +694,18 @@ final class AVPlayerBackend: PlayerBackend {
 
             if player.timeControlStatus == .playing {
                 self.model.objectWillChange.send()
-                if player.rate != Float(self.model.currentRate) {
-                    player.rate = Float(self.model.currentRate)
+
+                if let rate = self.model.rateToRestore, player.rate != rate {
+                    player.rate = rate
+                    self.model.rateToRestore = nil
+                }
+
+                if player.rate > 0, player.rate != Float(self.model.currentRate) {
+                    if self.model.avPlayerUsesSystemControls {
+                        self.model.currentRate = Double(player.rate)
+                    } else {
+                        player.rate = Float(self.model.currentRate)
+                    }
                 }
             }
 
@@ -635,10 +715,14 @@ final class AVPlayerBackend: PlayerBackend {
                 } else {
                     ScreenSaverManager.shared.enable()
                 }
+            #else
+                DispatchQueue.main.async {
+                    UIApplication.shared.isIdleTimerDisabled = self.model.presentingPlayer && self.isPlaying
+                }
             #endif
 
             self.timeObserverThrottle.execute {
-                self.model.updateWatch()
+                self.model.updateWatch(time: self.currentTime)
             }
         }
     }
@@ -688,13 +772,27 @@ final class AVPlayerBackend: PlayerBackend {
 
     func didChangeTo() {
         if startPictureInPictureOnSwitch {
-            startPictureInPictureOnSwitch = false
             tryStartingPictureInPicture()
         } else if model.musicMode {
             startMusicMode()
         } else {
             stopMusicMode()
         }
+
+        #if os(iOS)
+            if model.playingFullScreen {
+                ControlOverlaysModel.shared.hide()
+                model.navigation.presentingPlaybackSettings = false
+
+                model.onPlayStream.append { _ in
+                    self.controller.enterFullScreen(animated: true)
+                }
+            }
+        #endif
+    }
+
+    var isStartingPiP: Bool {
+        startPictureInPictureOnPlay || startPictureInPictureOnSwitch
     }
 
     func tryStartingPictureInPicture() {
@@ -708,10 +806,36 @@ final class AVPlayerBackend: PlayerBackend {
                     opened = true
                     controller.startPictureInPicture()
                 } else {
-                    print("PiP not possible, waited \(delay) seconds")
+                    self.logger.info("PiP not possible, waited \(delay) seconds")
                 }
             }
         }
+
+        Delay.by(5) {
+            self.startPictureInPictureOnSwitch = false
+        }
+    }
+
+    func setPlayerInLayer(_ playerIsPresented: Bool) {
+        if playerIsPresented {
+            bindPlayerToLayer()
+        } else {
+            removePlayerFromLayer()
+        }
+    }
+
+    func removePlayerFromLayer() {
+        playerLayer.player = nil
+        #if os(iOS)
+            controller.player = nil
+        #endif
+    }
+
+    func bindPlayerToLayer() {
+        playerLayer.player = avPlayer
+        #if os(iOS)
+            controller.player = avPlayer
+        #endif
     }
 
     func getTimeUpdates() {}

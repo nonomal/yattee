@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct CommentsView: View {
-    var embedInScrollView = false
     @State private var repliesID: Comment.ID?
+    @State private var availableWidth = 0.0
 
     @ObservedObject private var comments = CommentsModel.shared
 
@@ -15,26 +15,21 @@ struct CommentsView: View {
             } else if !comments.loaded {
                 PlaceholderProgressView()
             } else {
-                let last = comments.all.last
-                let commentsStack = LazyVStack {
+                LazyVStack {
                     ForEach(comments.all) { comment in
-                        CommentView(comment: comment, repliesID: $repliesID)
+                        CommentView(comment: comment, repliesID: $repliesID, availableWidth: availableWidth)
                             .onAppear {
                                 comments.loadNextPageIfNeeded(current: comment)
                             }
-                            .borderBottom(height: comment != last ? 0.5 : 0, color: Color("ControlsBorderColor"))
+                            .borderBottom(height: comment != comments.all.last ? 0.5 : 0, color: Color("ControlsBorderColor"))
                     }
                 }
-                .padding(.top, 55)
-
-                if embedInScrollView {
-                    ScrollView(.vertical, showsIndicators: false) {
-                        commentsStack
-                        Color.clear.frame(height: 50)
-                    }
-                } else {
-                    commentsStack
-                }
+                .background(GeometryReader { geometry in
+                    Color.clear
+                        .onAppear {
+                            self.availableWidth = Double(geometry.size.width)
+                        }
+                })
             }
         }
         .padding(.horizontal)

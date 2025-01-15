@@ -1,3 +1,4 @@
+import Alamofire
 import AVFoundation
 import Foundation
 import Siesta
@@ -6,6 +7,7 @@ import SwiftyJSON
 final class PipedAPI: Service, ObservableObject, VideosAPI {
     static var disallowedVideoCodecs = ["av01"]
     static var authorizedEndpoints = ["subscriptions", "subscribe", "unsubscribe", "user/playlists"]
+    static var contentItemsKeys = ["items", "content", "relatedStreams"]
 
     @Published var account: Account!
 
@@ -40,8 +42,25 @@ final class PipedAPI: Service, ObservableObject, VideosAPI {
             $0.headers["Authorization"] = self.account.token
         }
 
-        configureTransformer(pathPattern("channel/*")) { (content: Entity<JSON>) -> Channel? in
-            self.extractChannel(from: content.json)
+        configureTransformer(pathPattern("channel/*")) { (content: Entity<JSON>) -> ChannelPage in
+            let nextPage = content.json.dictionaryValue["nextpage"]?.string
+            let channel = self.extractChannel(from: content.json)
+            return ChannelPage(
+                results: self.extractContentItems(from: self.contentItemsDictionary(from: content.json)),
+                channel: channel,
+                nextPage: nextPage,
+                last: nextPage.isNil
+            )
+        }
+
+        configureTransformer(pathPattern("/nextpage/channel/*")) { (content: Entity<JSON>) -> ChannelPage in
+            let nextPage = content.json.dictionaryValue["nextpage"]?.string
+            return ChannelPage(
+                results: self.extractContentItems(from: self.contentItemsDictionary(from: content.json)),
+                channel: self.extractChannel(from: content.json),
+                nextPage: nextPage,
+                last: nextPage.isNil
+            )
         }
 
         configureTransformer(pathPattern("channels/tabs*")) { (content: Entity<JSON>) -> [ContentItem] in
@@ -94,8 +113,11 @@ final class PipedAPI: Service, ObservableObject, VideosAPI {
             content.json.arrayValue.compactMap { self.extractVideo(from: $0) }
         }
 
-        configureTransformer(pathPattern("comments/*")) { (content: Entity<JSON>) -> CommentsPage in
-            let details = content.json.dictionaryValue
+        configureTransformer(pathPattern("comments/*")) { (content: Entity<JSON>?) -> CommentsPage in
+            guard let details = content?.json.dictionaryValue else {
+                return CommentsPage(comments: [], nextPage: nil, disabled: true)
+            }
+
             let comments = details["comments"]?.arrayValue.compactMap { self.extractComment(from: $0) } ?? []
             let nextPage = details["nextpage"]?.string
             let disabled = details["disabled"]?.bool ?? false
@@ -130,28 +152,44 @@ final class PipedAPI: Service, ObservableObject, VideosAPI {
             return
         }
 
-        login.request(
-            .post,
-            json: ["username": username, "password": password]
+        AF.request(
+            login.url,
+            method: .post,
+            parameters: ["username": username, "password": password],
+            encoding: JSONEncoding.default
         )
-        .onSuccess { response in
-            let token = response.json.dictionaryValue["token"]?.string ?? ""
-            if let error = response.json.dictionaryValue["error"]?.string {
-                NavigationModel.shared.presentAlert(
-                    title: "Account Error",
-                    message: error
-                )
-            } else if !token.isEmpty {
-                AccountsModel.setToken(self.account, token)
-                self.objectWillChange.send()
-            } else {
-                NavigationModel.shared.presentAlert(
-                    title: "Account Error",
-                    message: "Could not update your token."
-                )
+        .responseDecodable(of: JSON.self) { [weak self] response in
+            guard let self else {
+                return
             }
 
-            self.configure()
+            switch response.result {
+            case let .success(value):
+                let json = JSON(value)
+                let token = json.dictionaryValue["token"]?.string ?? ""
+                if let error = json.dictionaryValue["error"]?.string {
+                    NavigationModel.shared.presentAlert(
+                        title: "Account Error",
+                        message: error
+                    )
+                } else if !token.isEmpty {
+                    AccountsModel.setToken(self.account, token)
+                    self.objectWillChange.send()
+                } else {
+                    NavigationModel.shared.presentAlert(
+                        title: "Account Error",
+                        message: "Could not update your token."
+                    )
+                }
+
+                self.configure()
+
+            case let .failure(error):
+                NavigationModel.shared.presentAlert(
+                    title: "Account Error",
+                    message: error.localizedDescription
+                )
+            }
         }
     }
 
@@ -159,13 +197,23 @@ final class PipedAPI: Service, ObservableObject, VideosAPI {
         resource(baseURL: account.url, path: "login")
     }
 
-    func channel(_ id: String, contentType: Channel.ContentType, data: String?) -> Resource {
-        if contentType == .videos {
-            return resource(baseURL: account.url, path: "channel/\(id)")
+    func channel(_ id: String, contentType: Channel.ContentType, data: String?, page: String?) -> Resource {
+        let path = page.isNil ? "channel" : "nextpage/channel"
+
+        var channel: Siesta.Resource
+
+        if contentType == .videos || data.isNil {
+            channel = resource(baseURL: account.url, path: "\(path)/\(id)")
+        } else {
+            channel = resource(baseURL: account.url, path: "channels/tabs")
+                .withParam("data", data)
         }
 
-        return resource(baseURL: account.url, path: "channels/tabs")
-            .withParam("data", data)
+        if let page, !page.isEmpty {
+            channel = channel.withParam("nextpage", page)
+        }
+
+        return channel
     }
 
     func channelByName(_ name: String) -> Resource? {
@@ -367,6 +415,7 @@ final class PipedAPI: Service, ObservableObject, VideosAPI {
             if let channel = extractChannel(from: content) {
                 return ContentItem(channel: channel)
             }
+
         default:
             return nil
         }
@@ -443,6 +492,35 @@ final class PipedAPI: Service, ObservableObject, VideosAPI {
         )
     }
 
+    static func nonProxiedAsset(asset: AVURLAsset, completion: @escaping (AVURLAsset?) -> Void) {
+        guard var urlComponents = URLComponents(url: asset.url, resolvingAgainstBaseURL: false) else {
+            completion(asset)
+            return
+        }
+
+        guard let hostItem = urlComponents.queryItems?.first(where: { $0.name == "host" }),
+              let hostValue = hostItem.value
+        else {
+            completion(asset)
+            return
+        }
+
+        urlComponents.host = hostValue
+
+        guard let newUrl = urlComponents.url else {
+            completion(asset)
+            return
+        }
+
+        completion(AVURLAsset(url: newUrl))
+    }
+
+    // Overload used for hlsURLS
+    static func nonProxiedAsset(url: URL, completion: @escaping (AVURLAsset?) -> Void) {
+        let asset = AVURLAsset(url: url)
+        nonProxiedAsset(asset: asset, completion: completion)
+    }
+
     private func extractVideo(from content: JSON) -> Video? {
         let details = content.dictionaryValue
 
@@ -468,7 +546,17 @@ final class PipedAPI: Service, ObservableObject, VideosAPI {
 
         let uploaded = details["uploaded"]?.double
         var published = (uploaded.isNil || uploaded == -1) ? nil : (uploaded! / 1000).formattedAsRelativeTime()
-        if published.isNil {
+        var publishedAt: Date?
+
+        let dateFormatter = ISO8601DateFormatter()
+        dateFormatter.formatOptions = [.withInternetDateTime]
+
+        if published.isNil,
+           let date = details["uploadDate"]?.string,
+           let formattedDate = dateFormatter.date(from: date)
+        {
+            publishedAt = formattedDate
+        } else {
             published = (details["uploadedDate"] ?? details["uploadDate"])?.string ?? ""
         }
 
@@ -481,6 +569,8 @@ final class PipedAPI: Service, ObservableObject, VideosAPI {
             chapters = extractChapters(from: description)
         }
 
+        let length = details["duration"]?.double ?? 0
+
         return Video(
             instanceID: account.instanceID,
             app: .piped,
@@ -488,13 +578,15 @@ final class PipedAPI: Service, ObservableObject, VideosAPI {
             videoID: extractID(from: content),
             title: details["title"]?.string ?? "",
             author: author,
-            length: details["duration"]?.double ?? 0,
+            length: length,
             published: published ?? "",
             views: details["views"]?.int ?? 0,
             description: description,
             channel: Channel(app: .piped, id: channelId, name: author, thumbnailURL: authorThumbnailURL, subscriptionsCount: subscriptionsCount),
             thumbnails: thumbnails,
             live: live,
+            short: details["isShort"]?.bool ?? (length <= Video.shortLength),
+            publishedAt: publishedAt,
             likes: details["likes"]?.int,
             dislikes: details["dislikes"]?.int,
             streams: extractStreams(from: content),
@@ -517,10 +609,11 @@ final class PipedAPI: Service, ObservableObject, VideosAPI {
             return nil
         }
 
-        return URL(string: thumbnailURL
-            .absoluteString
-            .replacingOccurrences(of: "hqdefault", with: quality.filename)
-            .replacingOccurrences(of: "maxresdefault", with: quality.filename)
+        return URL(
+            string: thumbnailURL
+                .absoluteString
+                .replacingOccurrences(of: "hqdefault", with: quality.filename)
+                .replacingOccurrences(of: "maxresdefault", with: quality.filename)
         )
     }
 
@@ -589,6 +682,10 @@ final class PipedAPI: Service, ObservableObject, VideosAPI {
             .dictionaryValue["audioStreams"]?
             .arrayValue
             .filter { $0.dictionaryValue["format"]?.string == "M4A" }
+            .filter { stream in
+                let type = stream.dictionaryValue["audioTrackType"]?.string
+                return type == nil || type == "ORIGINAL"
+            }
             .sorted {
                 $0.dictionaryValue["bitrate"]?.int ?? 0 >
                     $1.dictionaryValue["bitrate"]?.int ?? 0
@@ -600,16 +697,16 @@ final class PipedAPI: Service, ObservableObject, VideosAPI {
 
         let videoStreams = content.dictionaryValue["videoStreams"]?.arrayValue ?? []
 
-        videoStreams.forEach { videoStream in
+        for videoStream in videoStreams {
             let videoCodec = videoStream.dictionaryValue["codec"]?.string ?? ""
             if Self.disallowedVideoCodecs.contains(where: videoCodec.contains) {
-                return
+                continue
             }
 
             guard let audioAssetUrl = audioStream.dictionaryValue["url"]?.url,
                   let videoAssetUrl = videoStream.dictionaryValue["url"]?.url
             else {
-                return
+                continue
             }
 
             let audioAsset = AVURLAsset(url: audioAssetUrl)
@@ -621,6 +718,20 @@ final class PipedAPI: Service, ObservableObject, VideosAPI {
             let fps = qualityComponents.count > 1 ? Int(qualityComponents[1]) : 30
             let resolution = Stream.Resolution.from(resolution: quality, fps: fps)
             let videoFormat = videoStream.dictionaryValue["format"]?.string
+            let bitrate = videoStream.dictionaryValue["bitrate"]?.int
+            var requestRange: String?
+
+            if let initStart = videoStream.dictionaryValue["initStart"]?.int,
+               let initEnd = videoStream.dictionaryValue["initEnd"]?.int
+            {
+                requestRange = "\(initStart)-\(initEnd)"
+            } else if let indexStart = videoStream.dictionaryValue["indexStart"]?.int,
+                      let indexEnd = videoStream.dictionaryValue["indexEnd"]?.int
+            {
+                requestRange = "\(indexStart)-\(indexEnd)"
+            } else {
+                requestRange = nil
+            }
 
             if videoOnly {
                 streams.append(
@@ -630,7 +741,9 @@ final class PipedAPI: Service, ObservableObject, VideosAPI {
                         videoAsset: videoAsset,
                         resolution: resolution,
                         kind: .adaptive,
-                        videoFormat: videoFormat
+                        videoFormat: videoFormat,
+                        bitrate: bitrate,
+                        requestRange: requestRange
                     )
                 )
             } else {
@@ -661,15 +774,23 @@ final class PipedAPI: Service, ObservableObject, VideosAPI {
         let commentorUrl = details["commentorUrl"]?.string
         let channelId = commentorUrl?.components(separatedBy: "/")[2] ?? ""
 
+        let commentText = extractCommentText(from: details["commentText"]?.stringValue)
+        let commentId = details["commentId"]?.string ?? UUID().uuidString
+
+        // Sanity checks: return nil if required data is missing
+        if commentText.isEmpty || commentId.isEmpty || author.isEmpty {
+            return nil
+        }
+
         return Comment(
-            id: details["commentId"]?.string ?? UUID().uuidString,
+            id: commentId,
             author: author,
             authorAvatarURL: details["thumbnail"]?.string ?? "",
             time: details["commentedTime"]?.string ?? "",
             pinned: details["pinned"]?.bool ?? false,
             hearted: details["hearted"]?.bool ?? false,
             likeCount: details["likeCount"]?.int ?? 0,
-            text: extractCommentText(from: details["commentText"]?.stringValue),
+            text: commentText,
             repliesPage: details["repliesPage"]?.string,
             channel: Channel(app: .piped, id: channelId, name: author)
         )
@@ -696,5 +817,15 @@ final class PipedAPI: Service, ObservableObject, VideosAPI {
 
             return Chapter(title: title, image: image, start: start)
         }
+    }
+
+    private func contentItemsDictionary(from content: JSON) -> JSON {
+        if let key = Self.contentItemsKeys.first(where: { content.dictionaryValue.keys.contains($0) }),
+           let items = content.dictionaryValue[key]
+        {
+            return items
+        }
+
+        return .null
     }
 }

@@ -8,44 +8,101 @@ import SwiftUI
 struct VideoDescription: View {
     private var search: SearchModel { .shared }
     @Default(.showKeywords) private var showKeywords
+    @Default(.expandVideoDescription) private var expandVideoDescription
+    @Default(.collapsedLinesDescription) private var collapsedLinesDescription
 
     var video: Video
     var detailsSize: CGSize?
+    @Binding var expand: Bool
 
     var description: String {
         video.description ?? ""
     }
 
     var body: some View {
-        VStack {
-            #if os(iOS)
-                ActiveLabelDescriptionRepresentable(description: description, detailsSize: detailsSize)
-            #else
-                textDescription
-            #endif
+        descriptionView.id(video.videoID)
+    }
 
-            keywords
+    @ViewBuilder var descriptionView: some View {
+        if !expand && collapsedLinesDescription == 0 {
+            EmptyView()
+        } else {
+            VStack {
+                #if os(iOS)
+                    ActiveLabelDescriptionRepresentable(
+                        description: description,
+                        detailsSize: detailsSize,
+                        expand: expand
+                    )
+                #else
+                    textDescription
+                #endif
+
+                keywords
+            }
+            .contentShape(Rectangle())
+            .overlay(
+                Group {
+                    #if canImport(UIKit)
+                        if !expand {
+                            Button(action: { expand.toggle() }) {
+                                Rectangle()
+                                    .foregroundColor(.clear)
+                            }
+                        }
+                    #endif
+                }
+            )
         }
-        .id(video.videoID)
     }
 
     @ViewBuilder var textDescription: some View {
-        #if !os(iOS)
+        #if canImport(AppKit)
             Group {
                 if #available(macOS 12, *) {
-                    Text(description)
-                    #if !os(tvOS)
+                    DescriptionWithLinks(description: description, detailsSize: detailsSize)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .lineLimit(expand ? 500 : collapsedLinesDescription)
                         .textSelection(.enabled)
-                    #endif
                 } else {
                     Text(description)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .lineLimit(expand ? 500 : collapsedLinesDescription)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .multilineTextAlignment(.leading)
             .font(.system(size: 14))
             .lineSpacing(3)
+            .allowsHitTesting(expand)
         #endif
     }
+
+    // If possibe convert URLs to clickable links
+    #if canImport(AppKit)
+        @available(macOS 12, *)
+        struct DescriptionWithLinks: View {
+            let description: String
+            let detailsSize: CGSize?
+            let separators = CharacterSet(charactersIn: " \n")
+
+            var formattedString: AttributedString {
+                var attrString = AttributedString(description)
+                let words = description.unicodeScalars.split(whereSeparator: separators.contains).map(String.init)
+                for word in words {
+                    if word.hasPrefix("https://") || word.hasPrefix("http://"), let url = URL(string: String(word)) {
+                        if let range = attrString.range(of: word) {
+                            attrString[range].link = url
+                        }
+                    }
+                }
+                return attrString
+            }
+
+            var body: some View {
+                Text(formattedString)
+            }
+        }
+    #endif
 
     @ViewBuilder var keywords: some View {
         if showKeywords {
@@ -77,7 +134,7 @@ struct VideoDescription: View {
     }
 
     var showScrollIndicators: Bool {
-        #if os(macOS)
+        #if canImport(AppKit)
             false
         #else
             true
@@ -89,10 +146,13 @@ struct VideoDescription: View {
     struct ActiveLabelDescriptionRepresentable: UIViewRepresentable {
         var description: String
         var detailsSize: CGSize?
+        var expand: Bool
 
         @State private var label = ActiveLabel()
 
         @Environment(\.openURL) private var openURL
+
+        @Default(.collapsedLinesDescription) private var collapsedLinesDescription
 
         var player = PlayerModel.shared
 
@@ -103,12 +163,12 @@ struct VideoDescription: View {
 
         func updateUIView(_: UIViewType, context _: Context) {
             updatePreferredMaxLayoutWidth()
+            updateNumberOfLines()
         }
 
         func customizeLabel() {
             label.customize { label in
                 label.enabledTypes = [.url, .timestamp]
-                label.numberOfLines = 0
                 label.text = description
                 label.contentMode = .scaleAspectFill
                 label.font = .systemFont(ofSize: 14)
@@ -119,10 +179,20 @@ struct VideoDescription: View {
                 label.handleURLTap(urlTapHandler(_:))
                 label.handleTimestampTap(timestampTapHandler(_:))
             }
+            updateNumberOfLines()
         }
 
         func updatePreferredMaxLayoutWidth() {
             label.preferredMaxLayoutWidth = (detailsSize?.width ?? 330) - 30
+        }
+
+        func updateNumberOfLines() {
+            if expand || collapsedLinesDescription > 0 {
+                label.numberOfLines = expand ? 0 : collapsedLinesDescription
+                label.isHidden = false
+            } else {
+                label.isHidden = true
+            }
         }
 
         func urlTapHandler(_ url: URL) {
@@ -139,7 +209,8 @@ struct VideoDescription: View {
                     {
                         player.backend.seek(to: Double(time), seekType: .userInteracted)
                         return
-                    } else if destination != nil {
+                    }
+                    if destination != nil {
                         urlToOpen = yatteeURL
                     }
                 }
@@ -156,7 +227,7 @@ struct VideoDescription: View {
 
 struct VideoDescription_Previews: PreviewProvider {
     static var previews: some View {
-        VideoDescription(video: .fixture)
+        VideoDescription(video: .fixture, expand: .constant(false))
             .injectFixtureEnvironmentObjects()
     }
 }

@@ -6,27 +6,39 @@ struct VerticalCells<Header: View>: View {
         @Environment(\.verticalSizeClass) private var verticalSizeClass
     #endif
 
-    @Environment(\.scrollViewBottomPadding) private var scrollViewBottomPadding
     @Environment(\.loadMoreContentHandler) private var loadMoreContentHandler
     @Environment(\.listingStyle) private var listingStyle
 
     var items = [ContentItem]()
     var allowEmpty = false
+    var edgesIgnoringSafeArea = Edge.Set.horizontal
 
     let header: Header?
-    init(items: [ContentItem], allowEmpty: Bool = false, @ViewBuilder header: @escaping () -> Header? = { nil }) {
+
+    @State private var gridSize = CGSize.zero
+
+    init(
+        items: [ContentItem],
+        allowEmpty: Bool = false,
+        edgesIgnoringSafeArea: Edge.Set = .horizontal,
+        @ViewBuilder header: @escaping () -> Header? = { nil }
+    ) {
         self.items = items
         self.allowEmpty = allowEmpty
+        self.edgesIgnoringSafeArea = edgesIgnoringSafeArea
         self.header = header()
     }
 
-    init(items: [ContentItem], allowEmpty: Bool = false) where Header == EmptyView {
+    init(
+        items: [ContentItem],
+        allowEmpty: Bool = false
+    ) where Header == EmptyView {
         self.init(items: items, allowEmpty: allowEmpty) { EmptyView() }
     }
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: scrollViewShowsIndicators) {
-            LazyVGrid(columns: columns, alignment: .center) {
+            LazyVGrid(columns: adaptiveItem, alignment: .center) {
                 Section(header: header) {
                     ForEach(contentItems) { item in
                         ContentItemView(item: item)
@@ -35,15 +47,12 @@ struct VerticalCells<Header: View>: View {
                 }
             }
             .padding()
-            #if !os(tvOS)
-                Color.clear.padding(.bottom, scrollViewBottomPadding)
-            #endif
         }
         .animation(nil)
-        .edgesIgnoringSafeArea(.horizontal)
+        .edgesIgnoringSafeArea(edgesIgnoringSafeArea)
         #if os(macOS)
             .background(Color.secondaryBackground)
-            .frame(minWidth: 360)
+            .frame(minWidth: Constants.contentViewMinWidth)
         #endif
     }
 
@@ -56,14 +65,6 @@ struct VerticalCells<Header: View>: View {
         if items.firstIndex(where: { $0.id == item.id }) == thresholdIndex {
             loadMoreContentHandler()
         }
-    }
-
-    var columns: [GridItem] {
-        #if os(tvOS)
-            contentItems.count < 3 ? Array(repeating: GridItem(.fixed(500)), count: [contentItems.count, 1].max()!) : adaptiveItem
-        #else
-            adaptiveItem
-        #endif
     }
 
     var adaptiveItem: [GridItem] {

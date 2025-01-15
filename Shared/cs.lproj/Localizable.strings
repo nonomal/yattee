@@ -74,7 +74,7 @@
 "Custom Locations" = "Vlastní umístění";
 "Delete" = "Smazat";
 "Disabled" = "Deaktivováno";
-"Discord Server" = "Server Discordu";
+"Discord Server" = "Discord Server";
 "Decrease rate" = "Snížit tempo";
 "Decreased opacity" = "Snížená průhlednost";
 "Don't use public locations" = "Nepoužívat veřejné lokace";
@@ -94,7 +94,7 @@
 "Find Other" = "Najít ostatní";
 "Frontend URL" = "URL Frontendu";
 "Gaming" = "Hry";
-"Help" = "Pomoc";
+"Help" = "Nápověda";
 "Hide sidebar" = "Skrýt postranní panel";
 "High" = "Vysoká";
 "Highest" = "Nejvyšší";
@@ -107,7 +107,7 @@
 "I have a feature request" = "Mám prosbu o přidání funkce";
 "I like this app!" = "Tato aplikace se mi líbí!";
 "If you are interested what's coming in future updates, you can track project Milestones." = "Pokud vás zajímá co přijde v budoucích aktualizacích, můžete sledovat Milestony projektu.";
-"Info" = "Info";
+"Info" = "Informace";
 "Instance of current account" = "Instance aktuálního účtu";
 
 /* SponsorBlock category name */
@@ -166,7 +166,7 @@
 "Only when signed in" = "Pouze když přihlášený";
 "Open \"Playlists\" tab to create new one" = "Otevřete kartu \"Playlisty\", aby jste vytvořili nový";
 "Open Settings" = "Otevřete Nastavení";
-"Opening audio stream..." = "Otevírám audio stream...";
+"Opening audio stream…" = "Otevírám audio stream…";
 "Orientation" = "Orientace";
 "Password" = "Heslo";
 "Pause" = "Pauza";
@@ -224,7 +224,7 @@
 "Search..." = "Hledat...";
 "Sections" = "Sekce";
 "Seek gesture sensitivity" = "Sensitivita gest posouvání";
-"Seek with horizontal swipe on video" = "Posouvání pomocí horizontálního potažení na videu";
+"Seek with horizontal swipe on video" = "Posouvání ve videu potažením do stran";
 "Select location closest to you:" = "Vyberte nejbližší lokaci:";
 "Share %@ link" = "Sdílet %@ odkaz";
 "Share %@ link with time" = "Sdílet %@ odkaz s časem";
@@ -401,11 +401,11 @@
 "Promoting a product or service that is directly related to the creator themselves. This usually includes merchandise or promotion of monetized platforms." = "Propagace produktu nebo služby, která přímo souvisí s tvůrcem samotným. Obvykle se jedná o zboží nebo zpeněžené platformy.";
 
 /* Loading stream OSD */
-"Loading streams..." = "Načítaní streamu...";
+"Loading streams…" = "Načítaní streamu…";
 "Matrix Chat" = "Matrix Chat";
 
 /* Loading stream OSD */
-"Opening %@ stream..." = "Otevírám %@ stream...";
+"Opening %@ stream…" = "Otevírám %@ stream…";
 
 /* SponsorBlock category name */
 "Outro" = "Zakončení";
@@ -431,7 +431,7 @@
 "Sort" = "Třídit";
 "SponsorBlock" = "SponsorBlock";
 "You can use automatic profile selection based on current device status or switch it in video playback settings controls." = "Můžete použít automatický výběr profilu podle aktuálního stavu zařízení nebo jej přepnout v nastavení přehrávání.";
-"Edit Favorites…" = "Upravit Oblíbené…";
+"Edit Favorites…" = "Upravit seznam oblíbených…";
 "Reload manifest" = "Znovu načíst manifest";
 "Paste" = "Vložit";
 "Playback Mode" = "Režim přehrávání";
@@ -446,11 +446,11 @@
 "Are you sure you want to remove %@ location?" = "Opravdu chcete odstranit umístění %@?";
 "Recent Documents" = "Poslední dokumenty";
 "Recent History" = "Nedávná historie";
-"Show Favorites" = "Zobrazit Oblíbené";
-"Show Open Videos quick actions" = "Zobrazit rychlé akce Otevřít videa";
-"Home" = "Domov";
-"Share files from Finder on a Mac\nor iTunes on Windows" = "Sdílejte soubory z Finderu na Macu\\nor iTunes na Windows";
-"Show Home" = "Zobrazit Domov";
+"Show Favorites" = "Zobrazit oblíbené";
+"Show Open Videos quick actions" = "Zobrazit tlačítka pro rychlé otevření videa";
+"Home" = "Domů";
+"Share files from Finder on a Mac\nor iTunes on Windows" = "Sdílejte soubory z Finderu na Macu \nnebo iTunes na Windows";
+"Show Home" = "Zobrazit kartu Domů";
 "Pages toolbar position" = "Pozice panelu nástrojů";
 "Video Details" = "Podrobnosti o videu";
 "Show Inspector" = "Zobrazit Inspektor";
@@ -498,3 +498,91 @@
 "Default Profile" = "Výchozí profil";
 "Copy%@link" = "Zkopírovat%@odkaz";
 "Share%@link" = "Sdílet%@odkaz";
+"Verified" = "Ověřeno";
+"Shorts" = "Shorts";
+"Channel" = "Kanál";
+"Live Streams" = "Živé vysílání";
+"Open expanded" = "Otevřít rozbalené";
+"Gesture settings control skipping interval for double tap gesture on left/right side of the player. Changing system controls settings requires restart." = "Nastavení gest řídí interval přeskakování pro gesto dvojitého klepnutí na levé/pravé straně přehrávače. Změna nastavení ovládání systému vyžaduje restart.";
+"Right click channel thumbnail to open context menu with more actions" = "Kliknutím pravým tlačítkem myši na miniaturu kanálu otevřete kontextovou nabídku s dalšími akcemi";
+"Actions Buttons" = "Tlačítka akcí";
+"Play next item" = "Přehrát další položku";
+"Lock orientation" = "Zámek orientace";
+"Music Mode" = "Hudební režim";
+"Gesture settings control skipping interval for remote arrow buttons (for 2nd generation Siri Remote or newer). Changing system controls settings requires restart." = "Nastavení gesta řídí interval přeskakování pomocí tlačítek se šipkami na dálkovém ovladači (pro 2. generaci ovladače Siri Remote nebo novější). Změna nastavení ovládání systému vyžaduje restart.";
+"Mark channel feed as watched" = "Označit kanál jako shlédnutý";
+"Player Bar" = "Panel přehrávače";
+"Short videos: visible" = "Krátká videa: viditelná";
+"Short videos: hidden" = "Krátká videa: skrytá";
+"Mark channel feed as unwatched" = "Označit kanál jako neshlédnutý";
+"Play all unwatched" = "Přehrát všechny neshlédnuté";
+"Double tap gesture" = "Gesto dvojitého klepnutí";
+"Tap and hold channel thumbnail to open context menu with more actions" = "Klepnutím a podržením miniatury kanálu otevřete kontextovou nabídku s dalšími akcemi";
+"Clear all" = "Vymazat vše";
+"Hide player" = "Skrýt přehrávač";
+"Close video" = "Zavřít video";
+"Total size: %@" = "Celková velikost: %@";
+"Show cache status" = "Zobrazit stav mezipaměti";
+"Maximum feed items" = "Maximální počet položek ve feedu";
+"Open channels with description expanded" = "Otevírat kanály s rozbaleným popisem";
+"Are you sure you want to clear cache?" = "Určitě chcete vymazat mezipaměť?";
+"Always show controls buttons" = "Vždy zobrazit ovládací tlačítka";
+"Single tap gesture" = "Gesto jednoho klepnutí";
+"Maximum width expanded" = "Maximální šířka";
+"Show unwatched feed badges" = "Zobrazit odznaky nesledovaných kanálů";
+"Seeking" = "Hledání";
+"Gesture: fowards" = "Gesto: dopředu";
+"Controls Buttons" = "Ovládací tlačítka";
+"System controls" = "Ovládání systému";
+"Controls button: backwards" = "Ovládací tlačítko: dozadu";
+"Controls button: forwards" = "Ovládací tlačítko: dopředu";
+"Gesture: backwards" = "Gesto: dozadu";
+"Gesture settings control skipping interval for double click on left/right side of the player. Changing system controls settings requires restart." = "Nastavení gest řídí interval přeskakování pro gesto dvojitého klepnutí na levé/pravé straně přehrávače. Změna nastavení ovládání systému vyžaduje restart.";
+"Cache" = "Mezipaměť";
+"Subscribe/Unsubscribe" = "Odebírat/Odhlásit odběr";
+"Available" = "Dostupné";
+"Are you sure you want to remove %@ from Favorites?" = "Opravdu chcete odstranit %@ z oblíbených položek?";
+"Use system controls with AVPlayer" = "Použití systémových ovládacích prvků s AVPlayerem";
+"Opening file…" = "Otvírání souboru…";
+"No videos to show" = "Žádná videa k zobrazení";
+"Autoplay next" = "Automaticky přehrát další";
+"Inspector" = "Inspektor";
+"Home Settings" = "Nastavení domovské karty";
+"Watched: visible" = "Přehrané: viditelné";
+"Fullscreen" = "Celá obrazovka";
+"Playback Settings" = "Nastavení přehrávání";
+"Play Now in MPV" = "Přehrát v MPV";
+"(watched and shorts hidden)" = "(skrýt přehrané a krátká videa)";
+"Enter account credentials to connect..." = "Zadejte přihlašovací údaje k účtu a připojte se...";
+"Queue - shuffled" = "Fronta - náhodně";
+"Cells" = "Položky";
+"Limit" = "Limit";
+"Watched: hidden" = "Přehrané: skryté";
+"Stream" = "Stream";
+"Do nothing" = "Ignorovat";
+"Next in Queue" = "Další ve frontě";
+"Open video description expanded" = "Otevřít rozšířený popisek videa";
+"Mark all as unwatched" = "Označit vše jako nepřehrané";
+"Replay" = "Přehrát znova";
+"(watched hidden)" = "(skrýt přehrané)";
+"Mark all as watched" = "Označit vše jako přehrané";
+"Show scroll to top button in comments" = "Zobrazit tlačítko pro posun na začátek v komentářích";
+"List" = "Seznam";
+"Enter location address to connect..." = "Zadejte adresu pro připojení...";
+"File Extension" = "File Extension";
+"Opened File" = "Otevřený soubor";
+"Public account" = "Veřejný účet";
+"Lock" = "Zamknout";
+"(shorts hidden)" = "(skrýt krátká videa)";
+"Toggle size" = "Přepnout velikost";
+"No rotation" = "Bez otáčení";
+"Startup section" = "Úvodní obrazovka";
+"Browse without account" = "Procházet bez účtu";
+"Play Now in AVPlayer" = "Přehrát v AVPlayer";
+"Close video and player on end" = "Ukončit video a přehrávač na konci";
+"Disable filters" = "Zakázat filtry";
+"Your Accounts" = "Vaše účty";
+"Open channel" = "Otevřít kanál";
+"Show Next in Queue" = "Zobrazit další v řadě";
+"Description" = "Popisek";
+"Feed" = "Feed";

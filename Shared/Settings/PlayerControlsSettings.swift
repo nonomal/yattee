@@ -2,10 +2,13 @@ import Defaults
 import SwiftUI
 
 struct PlayerControlsSettings: View {
+    @Default(.avPlayerUsesSystemControls) private var avPlayerUsesSystemControls
+
     @Default(.systemControlsCommands) private var systemControlsCommands
     @Default(.playerControlsLayout) private var playerControlsLayout
     @Default(.fullScreenPlayerControlsLayout) private var fullScreenPlayerControlsLayout
     @Default(.horizontalPlayerGestureEnabled) private var horizontalPlayerGestureEnabled
+    @Default(.fullscreenPlayerGestureEnabled) private var fullscreenPlayerGestureEnabled
     @Default(.seekGestureSpeed) private var seekGestureSpeed
     @Default(.seekGestureSensitivity) private var seekGestureSensitivity
     @Default(.buttonBackwardSeekDuration) private var buttonBackwardSeekDuration
@@ -13,14 +16,19 @@ struct PlayerControlsSettings: View {
     @Default(.gestureBackwardSeekDuration) private var gestureBackwardSeekDuration
     @Default(.gestureForwardSeekDuration) private var gestureForwardSeekDuration
     @Default(.systemControlsSeekDuration) private var systemControlsSeekDuration
+    @Default(.playerActionsButtonLabelStyle) private var playerActionsButtonLabelStyle
     @Default(.actionButtonShareEnabled) private var actionButtonShareEnabled
     @Default(.actionButtonSubscribeEnabled) private var actionButtonSubscribeEnabled
-    @Default(.actionButtonNextEnabled) private var actionButtonNextEnabled
     @Default(.actionButtonCloseEnabled) private var actionButtonCloseEnabled
     @Default(.actionButtonAddToPlaylistEnabled) private var actionButtonAddToPlaylistEnabled
     @Default(.actionButtonSettingsEnabled) private var actionButtonSettingsEnabled
+    @Default(.actionButtonFullScreenEnabled) private var actionButtonFullScreenEnabled
+    @Default(.actionButtonPipEnabled) private var actionButtonPipEnabled
+    @Default(.actionButtonLockOrientationEnabled) private var actionButtonLockOrientationEnabled
+    @Default(.actionButtonRestartEnabled) private var actionButtonRestartEnabled
+    @Default(.actionButtonAdvanceToNextItemEnabled) private var actionButtonAdvanceToNextItemEnabled
+    @Default(.actionButtonMusicModeEnabled) private var actionButtonMusicModeEnabled
     @Default(.actionButtonHideEnabled) private var actionButtonHideEnabled
-    @Default(.actionButtonNextQueueCountEnabled) private var actionButtonNextQueueCountEnabled
 
     #if os(iOS)
         @Default(.playerControlsLockOrientationEnabled) private var playerControlsLockOrientationEnabled
@@ -30,8 +38,8 @@ struct PlayerControlsSettings: View {
     @Default(.playerControlsRestartEnabled) private var playerControlsRestartEnabled
     @Default(.playerControlsAdvanceToNextEnabled) private var playerControlsAdvanceToNextEnabled
     @Default(.playerControlsPlaybackModeEnabled) private var playerControlsPlaybackModeEnabled
-    @Default(.playerControlsNextEnabled) private var playerControlsNextEnabled
     @Default(.playerControlsMusicModeEnabled) private var playerControlsMusicModeEnabled
+    @Default(.playerControlsBackgroundOpacity) private var playerControlsBackgroundOpacity
 
     private var player = PlayerModel.shared
 
@@ -57,7 +65,11 @@ struct PlayerControlsSettings: View {
 
     @ViewBuilder var sections: some View {
         #if !os(tvOS)
-            Section(header: SettingsHeader(text: "Controls".localized()), footer: controlsLayoutFooter) {
+            Section(header: SettingsHeader(text: "Player Controls".localized()), footer: controlsLayoutFooter) {
+                avPlayerUsesSystemControlsToggle
+                #if os(iOS)
+                    fullscreenPlayerGestureEnabledToggle
+                #endif
                 horizontalPlayerGestureEnabledToggle
                 SettingsHeader(text: "Seek gesture sensitivity".localized(), secondary: true)
                 seekGestureSensitivityPicker
@@ -67,10 +79,12 @@ struct PlayerControlsSettings: View {
                 playerControlsLayoutPicker
                 SettingsHeader(text: "Fullscreen size".localized(), secondary: true)
                 fullScreenPlayerControlsLayoutPicker
+                SettingsHeader(text: "Background opacity".localized(), secondary: true)
+                playerControlsBackgroundOpacityPicker
             }
         #endif
 
-        Section(header: SettingsHeader(text: "Seeking"), footer: seekingGestureSection) {
+        Section(header: SettingsHeader(text: "Seeking".localized()), footer: seekingGestureSection) {
             systemControlsCommandsPicker
 
             seekingSection
@@ -100,17 +114,24 @@ struct PlayerControlsSettings: View {
     }
 
     var controlsButtonsSection: some View {
-        Section(header: SettingsHeader(text: "Controls Buttons")) {
+        Section(header: SettingsHeader(text: "Player Control Buttons".localized())) {
             controlButtonToggles
         }
     }
 
     @ViewBuilder var actionsButtonsSection: some View {
-        Section(header: SettingsHeader(text: "Actions Buttons")) {
+        Section(header: SettingsHeader(text: "Actions Buttons".localized())) {
             actionButtonToggles
         }
 
-        actionButtonNextQueueCountEnabledToggle
+        Section {
+            Picker("Action button labels", selection: $playerActionsButtonLabelStyle) {
+                ForEach(ButtonLabelStyle.allCases, id: \.rawValue) { style in
+                    Text(style.description).tag(style)
+                }
+            }
+            .modifier(SettingsPickerModifier())
+        }
     }
 
     private var systemControlsCommandsPicker: some View {
@@ -138,8 +159,16 @@ struct PlayerControlsSettings: View {
         #endif
     }
 
+    private var fullscreenPlayerGestureEnabledToggle: some View {
+        Toggle("Swipe up toggles fullscreen", isOn: $fullscreenPlayerGestureEnabled)
+    }
+
     private var horizontalPlayerGestureEnabledToggle: some View {
-        Toggle("Seek with horizontal swipe on video", isOn: $horizontalPlayerGestureEnabled)
+        Toggle("Seek with horizontal swipe", isOn: $horizontalPlayerGestureEnabled)
+    }
+
+    private var avPlayerUsesSystemControlsToggle: some View {
+        Toggle("Use system controls with AVPlayer", isOn: $avPlayerUsesSystemControls)
     }
 
     private var seekGestureSensitivityPicker: some View {
@@ -182,6 +211,15 @@ struct PlayerControlsSettings: View {
         .modifier(SettingsPickerModifier())
     }
 
+    private var playerControlsBackgroundOpacityPicker: some View {
+        Picker("Background opacity", selection: $playerControlsBackgroundOpacity) {
+            ForEach(Array(stride(from: 0.0, through: 1.0, by: 0.1)), id: \.self) { value in
+                Text("\(Int(value * 100))%").tag(value)
+            }
+        }
+        .modifier(SettingsPickerModifier())
+    }
+
     @ViewBuilder private var seekingSection: some View {
         seekingDurationSetting("System controls", $systemControlsSeekDuration)
             .foregroundColor(systemControlsCommands == .restartAndAdvanceToNext ? .secondary : .primary)
@@ -205,24 +243,26 @@ struct PlayerControlsSettings: View {
 
     private func seekingDurationSetting(_ name: String, _ value: Binding<String>) -> some View {
         HStack {
-            Text(name)
+            Text(name.localized())
                 .frame(minWidth: 140, alignment: .leading)
             Spacer()
 
             HStack {
                 #if !os(tvOS)
-                    Label("Plus", systemImage: "plus")
+                    Label("Minus", systemImage: "minus")
                         .imageScale(.large)
                         .labelStyle(.iconOnly)
                         .padding(7)
                         .foregroundColor(.accentColor)
+                        .accessibilityAddTraits(.isButton)
                     #if os(iOS)
+                        .frame(minHeight: 35)
                         .background(RoundedRectangle(cornerRadius: 4).strokeBorder(lineWidth: 1).foregroundColor(.accentColor))
                     #endif
                         .contentShape(Rectangle())
                         .onTapGesture {
                             var intValue = Int(value.wrappedValue) ?? 10
-                            intValue += 5
+                            intValue -= 5
                             if intValue <= 0 {
                                 intValue = 5
                             }
@@ -239,26 +279,25 @@ struct PlayerControlsSettings: View {
                 TextField("Duration", text: value)
                     .frame(width: textFieldWidth, alignment: .trailing)
                     .multilineTextAlignment(.center)
-
                     .labelsHidden()
                 #if !os(macOS)
                     .keyboardType(.numberPad)
                 #endif
 
                 #if !os(tvOS)
-                    Label("Minus", systemImage: "minus")
+                    Label("Plus", systemImage: "plus")
                         .imageScale(.large)
                         .labelStyle(.iconOnly)
                         .padding(7)
                         .foregroundColor(.accentColor)
+                        .accessibilityAddTraits(.isButton)
                     #if os(iOS)
-                        .frame(minHeight: 35)
                         .background(RoundedRectangle(cornerRadius: 4).strokeBorder(lineWidth: 1).foregroundColor(.accentColor))
                     #endif
                         .contentShape(Rectangle())
                         .onTapGesture {
                             var intValue = Int(value.wrappedValue) ?? 10
-                            intValue -= 5
+                            intValue += 5
                             if intValue <= 0 {
                                 intValue = 5
                             }
@@ -270,13 +309,24 @@ struct PlayerControlsSettings: View {
     }
 
     @ViewBuilder private var actionButtonToggles: some View {
-        Toggle("Share", isOn: $actionButtonShareEnabled)
-        Toggle("Add to Playlist", isOn: $actionButtonAddToPlaylistEnabled)
-        Toggle("Subscribe/Unsubscribe", isOn: $actionButtonSubscribeEnabled)
-        Toggle("Settings", isOn: $actionButtonSettingsEnabled)
-        Toggle("Watch Next", isOn: $actionButtonNextEnabled)
-        Toggle("Hide player", isOn: $actionButtonHideEnabled)
-        Toggle("Close video", isOn: $actionButtonCloseEnabled)
+        Group {
+            Toggle("Share", isOn: $actionButtonShareEnabled)
+            Toggle("Add to Playlist", isOn: $actionButtonAddToPlaylistEnabled)
+            Toggle("Subscribe/Unsubscribe", isOn: $actionButtonSubscribeEnabled)
+            Toggle("Settings", isOn: $actionButtonSettingsEnabled)
+            Toggle("Fullscreen", isOn: $actionButtonFullScreenEnabled)
+            Toggle("Picture in Picture", isOn: $actionButtonPipEnabled)
+        }
+        Group {
+            #if os(iOS)
+                Toggle("Lock orientation", isOn: $actionButtonLockOrientationEnabled)
+            #endif
+            Toggle("Restart", isOn: $actionButtonRestartEnabled)
+            Toggle("Play next item", isOn: $actionButtonAdvanceToNextItemEnabled)
+            Toggle("Music Mode", isOn: $actionButtonMusicModeEnabled)
+            Toggle("Hide player", isOn: $actionButtonHideEnabled)
+            Toggle("Close video", isOn: $actionButtonCloseEnabled)
+        }
     }
 
     @ViewBuilder private var controlButtonToggles: some View {
@@ -289,15 +339,10 @@ struct PlayerControlsSettings: View {
         #endif
         Toggle("Restart", isOn: $playerControlsRestartEnabled)
         Toggle("Play next item", isOn: $playerControlsAdvanceToNextEnabled)
-        Toggle("Watch Next", isOn: $playerControlsNextEnabled)
-        Toggle("Playback mode", isOn: $playerControlsPlaybackModeEnabled)
+        Toggle("Playback Mode", isOn: $playerControlsPlaybackModeEnabled)
         #if !os(tvOS)
-            Toggle("Music mode", isOn: $playerControlsMusicModeEnabled)
+            Toggle("Music Mode", isOn: $playerControlsMusicModeEnabled)
         #endif
-    }
-
-    var actionButtonNextQueueCountEnabledToggle: some View {
-        Toggle("Count of items in queue in Watch Next button", isOn: $actionButtonNextQueueCountEnabled)
     }
 }
 

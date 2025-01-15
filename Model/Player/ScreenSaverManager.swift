@@ -2,7 +2,7 @@ import Foundation
 import IOKit.pwr_mgt
 
 struct ScreenSaverManager {
-    static var shared = ScreenSaverManager()
+    static var shared = Self()
 
     var noSleepAssertion: IOPMAssertionID = 0
     var noSleepReturn: IOReturn?
@@ -16,10 +16,12 @@ struct ScreenSaverManager {
             return false
         }
 
-        noSleepReturn = IOPMAssertionCreateWithName(kIOPMAssertionTypeNoDisplaySleep as CFString,
-                                                    IOPMAssertionLevel(kIOPMAssertionLevelOn),
-                                                    reason as CFString,
-                                                    &noSleepAssertion)
+        noSleepReturn = IOPMAssertionCreateWithName(
+            kIOPMAssertionTypeNoDisplaySleep as CFString,
+            IOPMAssertionLevel(kIOPMAssertionLevelOn),
+            reason as CFString,
+            &noSleepAssertion
+        )
         return noSleepReturn == kIOReturnSuccess
     }
 

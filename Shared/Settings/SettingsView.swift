@@ -1,13 +1,14 @@
 import Defaults
 import Foundation
 import SwiftUI
+
 struct SettingsView: View {
     static let matrixURL = URL(string: "https://tinyurl.com/matrix-yattee")!
     static let discordURL = URL(string: "https://yattee.stream/discord")!
 
     #if os(macOS)
         private enum Tabs: Hashable {
-            case browsing, player, controls, quality, history, sponsorBlock, locations, advanced, help
+            case browsing, player, controls, quality, history, sponsorBlock, locations, advanced, importExport, help
         }
 
         @State private var selection: Tabs = .browsing
@@ -24,13 +25,22 @@ struct SettingsView: View {
 
     @Default(.instances) private var instances
 
+    @State private var filesToShare = []
+
+    @ObservedObject private var navigation = NavigationModel.shared
+    @ObservedObject private var settingsModel = SettingsModel.shared
+
     var body: some View {
         settings
-            .alert(isPresented: $model.presentingAlert) { model.alert }
-        #if os(iOS)
-            .backport
-            .scrollDismissesKeyboardInteractively()
+            .modifier(ImportSettingsSheetViewModifier(isPresented: $settingsModel.presentingSettingsImportSheet, settingsFile: $settingsModel.settingsImportURL))
+        #if !os(tvOS)
+            .modifier(ImportSettingsFileImporterViewModifier(isPresented: $navigation.presentingSettingsFileImporter))
         #endif
+        #if os(iOS)
+        .backport
+        .scrollDismissesKeyboardInteractively()
+        #endif
+        .alert(isPresented: $model.presentingAlert) { model.alert }
     }
 
     var settings: some View {
@@ -101,6 +111,14 @@ struct SettingsView: View {
                 }
                 .tag(Tabs.advanced)
 
+                Group {
+                    ExportSettings()
+                }
+                .tabItem {
+                    Label("Export", systemImage: "square.and.arrow.up")
+                }
+                .tag(Tabs.importExport)
+
                 Form {
                     Help()
                 }
@@ -110,13 +128,27 @@ struct SettingsView: View {
                 .tag(Tabs.help)
             }
             .padding(20)
-            .frame(width: 650, height: windowHeight)
+            .frame(width: 700, height: windowHeight)
         #else
             NavigationView {
                 settingsList
                     .navigationTitle("Settings")
             }
         #endif
+    }
+
+    struct SettingsLabel: LabelStyle {
+        func makeBody(configuration: Configuration) -> some View {
+            #if os(tvOS)
+                Label {
+                    configuration.title.padding(.leading, 10)
+                } icon: {
+                    configuration.icon
+                }
+            #else
+                Label(configuration)
+            #endif
+        }
     }
 
     #if !os(macOS)
@@ -141,61 +173,69 @@ struct SettingsView: View {
                     NavigationLink {
                         BrowsingSettings()
                     } label: {
-                        Label("Browsing", systemImage: "list.and.film")
+                        Label("Browsing", systemImage: "list.and.film").labelStyle(SettingsLabel())
                     }
 
                     NavigationLink {
                         PlayerSettings()
                     } label: {
-                        Label("Player", systemImage: "play.rectangle")
+                        Label("Player", systemImage: "play.rectangle").labelStyle(SettingsLabel())
                     }
 
                     NavigationLink {
                         PlayerControlsSettings()
                     } label: {
-                        Label("Controls", systemImage: "hand.tap")
+                        Label("Controls", systemImage: "hand.tap").labelStyle(SettingsLabel())
                     }
 
                     NavigationLink {
                         QualitySettings()
                     } label: {
-                        Label("Quality", systemImage: "4k.tv")
+                        Label("Quality", systemImage: "4k.tv").labelStyle(SettingsLabel())
                     }
 
                     NavigationLink {
                         HistorySettings()
                     } label: {
-                        Label("History", systemImage: "clock.arrow.circlepath")
+                        Label("History", systemImage: "clock.arrow.circlepath").labelStyle(SettingsLabel())
                     }
 
                     if !accounts.isEmpty {
                         NavigationLink {
                             SponsorBlockSettings()
                         } label: {
-                            Label("SponsorBlock", systemImage: "dollarsign.circle")
+                            Label("SponsorBlock", systemImage: "dollarsign.circle").labelStyle(SettingsLabel())
                         }
                     }
 
                     NavigationLink {
                         LocationsSettings()
                     } label: {
-                        Label("Locations", systemImage: "globe")
+                        Label("Locations", systemImage: "globe").labelStyle(SettingsLabel())
                     }
 
                     NavigationLink {
                         AdvancedSettings()
                     } label: {
-                        Label("Advanced", systemImage: "wrench.and.screwdriver")
+                        Label("Advanced", systemImage: "wrench.and.screwdriver").labelStyle(SettingsLabel())
                     }
                 }
+                #if os(tvOS)
+                .padding(.horizontal, 20)
+                #endif
+
+                importView
 
                 Section(footer: helpFooter) {
                     NavigationLink {
                         Help()
                     } label: {
-                        Label("Help", systemImage: "questionmark.circle")
+                        Label("Help", systemImage: "questionmark.circle").labelStyle(SettingsLabel())
                     }
                 }
+                #if os(tvOS)
+                .padding(.horizontal, 20)
+                #endif
 
                 #if !os(tvOS)
                     Section(header: Text("Contact"), footer: versionString) {
@@ -205,7 +245,7 @@ struct SettingsView: View {
                                     .resizable()
                                     .renderingMode(.template)
                                     .frame(maxWidth: 30, maxHeight: 30)
-
+                                    .padding(.trailing, 6)
                                 Text("Discord Server")
                             }
                         }
@@ -216,6 +256,7 @@ struct SettingsView: View {
                                     .resizable()
                                     .renderingMode(.template)
                                     .frame(maxWidth: 30, maxHeight: 30)
+                                    .padding(.trailing, 6)
                                 Text("Matrix Chat")
                             }
                         }
@@ -239,25 +280,57 @@ struct SettingsView: View {
         }
     #endif
 
+    var importView: some View {
+        Section {
+            #if os(tvOS)
+                NavigationLink(destination: LazyView(ImportSettings())) {
+                    Label("Import Settings", systemImage: "square.and.arrow.down")
+                        .labelStyle(SettingsLabel())
+                }
+                .padding(.horizontal, 20)
+            #else
+                Button(action: importSettings) {
+                    Label("Import Settings...", systemImage: "square.and.arrow.down")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .foregroundColor(.accentColor)
+                .buttonStyle(.plain)
+
+                NavigationLink(destination: LazyView(ExportSettings())) {
+                    Label("Export Settings", systemImage: "square.and.arrow.up")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+            #endif
+        }
+    }
+
+    func importSettings() {
+        navigation.presentingSettingsFileImporter = true
+    }
+
     #if os(macOS)
         private var windowHeight: Double {
             switch selection {
             case .browsing:
-                return 820
+                return 800
             case .player:
-                return 450
+                return 800
             case .controls:
-                return 850
+                return 920
             case .quality:
                 return 420
             case .history:
-                return 500
+                return 600
             case .sponsorBlock:
-                return 700
+                return 970
             case .locations:
                 return 600
             case .advanced:
-                return 380
+                return 550
+            case .importExport:
+                return 580
             case .help:
                 return 650
             }

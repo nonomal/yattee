@@ -7,6 +7,7 @@ import Foundation
 final class Watch: NSManagedObject, Identifiable {
     @Default(.watchedThreshold) private var watchedThreshold
     @Default(.saveHistory) private var saveHistory
+    @Default(.showWatchingProgress) private var showWatchingProgress
 }
 
 extension Watch {
@@ -14,7 +15,7 @@ extension Watch {
         NSFetchRequest<Watch>(entityName: "Watch")
     }
 
-    @nonobjc class func markAsWatched(videoID: String, account: Account, duration: Double, context: NSManagedObjectContext) {
+    @nonobjc class func markAsWatched(videoID: String, account: Account, duration: Double, watchedAt: Date? = nil, context: NSManagedObjectContext) {
         let watchFetchRequest = Watch.fetchRequest()
         watchFetchRequest.predicate = NSPredicate(format: "videoID = %@", videoID as String)
 
@@ -36,7 +37,7 @@ extension Watch {
 
             watch.videoDuration = duration
             watch.stoppedAt = duration
-            watch.watchedAt = Date()
+            watch.watchedAt = watchedAt ?? .init()
 
             try? context.save()
         }
@@ -51,7 +52,7 @@ extension Watch {
     @NSManaged var appName: String?
     @NSManaged var instanceURL: URL?
 
-    var app: VideosApp! {
+    var app: VideosApp? {
         guard let appName else { return nil }
         return .init(rawValue: appName)
     }
@@ -101,5 +102,9 @@ extension Watch {
         }
 
         return Video(app: app ?? AccountsModel.shared.current?.app ?? .local, instanceURL: instanceURL, videoID: videoID)
+    }
+
+    var isShowingProgress: Bool {
+        saveHistory && showWatchingProgress && (finished || progress > 0)
     }
 }

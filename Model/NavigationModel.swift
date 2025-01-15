@@ -46,7 +46,7 @@ final class NavigationModel: ObservableObject {
             case .search:
                 return "search"
             #if os(tvOS)
-                case .settings: // swiftlint:disable:this switch_case_alignment
+                case .settings:
                     return "settings"
             #endif
             default:
@@ -63,7 +63,14 @@ final class NavigationModel: ObservableObject {
         }
     }
 
-    @Published var tabSelection: TabSelection!
+    @Published var tabSelection: TabSelection! { didSet {
+        if oldValue == tabSelection { multipleTapHandler() }
+        if tabSelection == nil, let item = recents.presentedItem {
+            Delay.by(0.2) { [weak self] in
+                self?.tabSelection = .recentlyOpened(item.tag)
+            }
+        }
+    }}
 
     @Published var presentingAddToPlaylist = false
     @Published var videoToAddToPlaylist: Video!
@@ -83,6 +90,10 @@ final class NavigationModel: ObservableObject {
     @Published var presentingSettings = false
     @Published var presentingAccounts = false
     @Published var presentingWelcomeScreen = false
+    @Published var presentingHomeSettings = false
+
+    @Published var presentingChannelSheet = false
+    @Published var channelPresentedInSheet: Channel!
 
     @Published var presentingShareSheet = false
     @Published var shareURL: URL?
@@ -96,6 +107,10 @@ final class NavigationModel: ObservableObject {
 
     @Published var presentingFileImporter = false
 
+    @Published var presentingSettingsImportSheet = false
+    @Published var presentingSettingsFileImporter = false
+    @Published var settingsImportURL: URL?
+
     func openChannel(_ channel: Channel, navigationStyle: NavigationStyle) {
         guard channel.id != Video.fixtureChannelID else {
             return
@@ -103,7 +118,6 @@ final class NavigationModel: ObservableObject {
 
         hideKeyboard()
         let presentingPlayer = player.presentingPlayer
-        player.hide()
         presentingChannel = false
 
         #if os(macOS)
@@ -113,20 +127,34 @@ final class NavigationModel: ObservableObject {
         let recent = RecentItem(from: channel)
         recents.add(RecentItem(from: channel))
 
-        if navigationStyle == .sidebar {
-            sidebarSectionChanged.toggle()
-            tabSelection = .recentlyOpened(recent.tag)
-        } else {
-            var delay = 0.0
+        let navigateToChannel = {
             #if os(iOS)
-                if presentingPlayer { delay = 1.0 }
+                self.player.hide()
             #endif
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+
+            if navigationStyle == .sidebar {
+                self.sidebarSectionChanged.toggle()
+                self.tabSelection = .recentlyOpened(recent.tag)
+            } else {
                 withAnimation(Constants.overlayAnimation) {
                     self.presentingChannel = true
                 }
             }
         }
+
+        #if os(iOS)
+            if presentingPlayer {
+                presentChannelInSheet(channel)
+            } else {
+                navigateToChannel()
+            }
+        #elseif os(tvOS)
+            Delay.by(0.01) {
+                navigateToChannel()
+            }
+        #else
+            navigateToChannel()
+        #endif
     }
 
     func openChannelPlaylist(_ playlist: ChannelPlaylist, navigationStyle: NavigationStyle) {
@@ -245,6 +273,8 @@ final class NavigationModel: ObservableObject {
         presentingChannel = false
         presentingPlaylist = false
         presentingOpenVideos = false
+        presentingFileImporter = false
+        presentingSettingsImportSheet = false
     }
 
     func hideKeyboard() {
@@ -255,8 +285,9 @@ final class NavigationModel: ObservableObject {
 
     func presentAlert(title: String, message: String? = nil) {
         let message = message.isNil ? nil : Text(message!)
-        alert = Alert(title: Text(title), message: message)
-        presentingAlert = true
+        let alert = Alert(title: Text(title), message: message)
+
+        presentAlert(alert)
     }
 
     func presentRequestErrorAlert(_ error: RequestError) {
@@ -265,6 +296,11 @@ final class NavigationModel: ObservableObject {
     }
 
     func presentAlert(_ alert: Alert) {
+        guard !presentingSettings else {
+            SettingsModel.shared.presentAlert(alert)
+            return
+        }
+
         self.alert = alert
         presentingAlert = true
     }
@@ -272,6 +308,30 @@ final class NavigationModel: ObservableObject {
     func presentShareSheet(_ url: URL) {
         shareURL = url
         presentingShareSheet = true
+    }
+
+    func presentChannelInSheet(_ channel: Channel) {
+        channelPresentedInSheet = channel
+        presentingChannelSheet = true
+    }
+
+    func multipleTapHandler() {
+        switch tabSelection {
+        case .search:
+            self.search.focused = true
+        default:
+            print("not implemented")
+        }
+    }
+
+    func presentSettingsImportSheet(_ url: URL, forceSettings: Bool = false) {
+        guard !presentingSettings, !forceSettings else {
+            ImportExportSettingsModel.shared.reset()
+            SettingsModel.shared.presentSettingsImportSheet(url)
+            return
+        }
+        settingsImportURL = url
+        presentingSettingsImportSheet = true
     }
 }
 

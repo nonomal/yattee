@@ -11,7 +11,7 @@ struct SearchSuggestions: View {
                 } label: {
                     HStack {
                         Image(systemName: "magnifyingglass")
-                        Text(state.queryText)
+                        Text(state.queryText.trimmingCharacters(in: .whitespacesAndNewlines))
                             .lineLimit(1)
                     }
                 }
@@ -59,9 +59,6 @@ struct SearchSuggestions: View {
                 #endif
             }
         }
-        #if os(iOS)
-        .padding(.bottom, 90)
-        #endif
         #if os(macOS)
         .buttonStyle(.link)
         #endif
